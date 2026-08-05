@@ -63,6 +63,7 @@ th.money{text-align:right}
   <div class="card"><h2>🔍 Recruiting queues</h2><div class="body" id="recruiting"></div></div>
   <div class="card"><h2>🏆 Partner scorecard</h2><div class="body" id="scorecard"></div></div>
   <div class="card"><h2>⏭️ Scheduled follow-ups</h2><div class="body" id="queued"></div></div>
+  <div class="card" style="grid-column:1/-1"><h2>💵 Pay queue — what we owe showing partners</h2><div class="body" id="payables"></div></div>
   <div class="card" style="grid-column:1/-1"><h2>💰 Deal economics (projected)</h2><div class="body"><div id="economics"></div><div class="meta" id="econ-assumptions" style="margin-top:8px"></div></div></div>
   <div class="card" style="grid-column:1/-1"><h2>💬 Recent activity</h2><div class="body" id="recent"></div></div>
 </div>
@@ -79,6 +80,16 @@ async function act(body) {
 }
 window.sendDraft = (id) => act({ action:"send_draft", comm_id:id });
 window.resolveAlert = (id) => act({ action:"resolve_alert", alert_id:id });
+window.approvePayable = (id, isEst) => {
+  let actual = null;
+  if (isEst) {
+    const v = prompt("This amount is an ESTIMATE. Enter the ACTUAL amount to approve (or leave blank to approve the estimate):");
+    if (v === null) return;
+    if (v.trim() !== "") actual = Number(v);
+  }
+  return act({ action:"approve_payable", payable_id:id, actual_usd: actual });
+};
+window.markPaid = (id) => { if (confirm("Mark this as PAID? (Record-keeping only — the actual payment happens through the broker/QBO.)")) act({ action:"mark_paid", payable_id:id }); };
 
 async function load() {
   try {
@@ -124,6 +135,20 @@ async function load() {
     ).join("") : `<div class="empty">Nothing scheduled.</div>`;
 
     const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+    document.getElementById("payables").innerHTML = d.payables?.length ?
+      `<div style="overflow-x:auto"><table><tr><th>Partner</th><th>Client</th><th>For</th><th class="money">Amount</th><th>Status</th><th>${d.viewer ? "" : "Action"}</th></tr>` +
+      d.payables.map(p => {
+        const cl = p.refnet_placements?.refnet_leads;
+        const amt = p.status === "paid" ? p.paid_usd : p.estimate_usd;
+        return `<tr>
+        <td><span class="who">${esc(p.refnet_partner_agents?.full_name ?? "?")}</span></td>
+        <td>${esc(cl ? (cl.first_name + " " + (cl.last_name ?? "")) : "")}</td>
+        <td>${esc(p.memo ?? p.kind)}</td>
+        <td class="money">${$(amt)}${p.is_estimate && p.status !== "paid" ? '<div class="meta">estimate</div>' : ""}</td>
+        <td><span class="kind${p.status === "pending_approval" ? " hot" : ""}">${esc(p.status.replace("_", " "))}</span>${p.paid_at ? `<div class="meta">paid ${et(p.paid_at)}</div>` : p.approved_at ? `<div class="meta">approved ${et(p.approved_at)}</div>` : ""}</td>
+        <td>${d.viewer ? "" : p.status === "pending_approval" ? `<button onclick="approvePayable('${p.id}', ${!!p.is_estimate})">Approve</button>` : p.status === "approved" ? `<button onclick="markPaid('${p.id}')">Mark paid</button>` : ""}</td></tr>`;
+      }).join("") + `</table></div><div class="meta" style="margin-top:8px">Fees accrue automatically when a showing is verified; commission shares when a deal closes. Approval and payment are always human decisions — nothing here moves money.</div>`
+      : `<div class="empty">Nothing owed — showings and closings accrue here automatically.</div>`;
     document.getElementById("economics").innerHTML = d.economics?.length ?
       `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">Price</th><th class="money">GCI</th><th class="money">Broker fee</th><th class="money">Showings</th><th class="money">Showing fees</th><th class="money">Agent comm. owed</th><th class="money">Net to INRE</th></tr>` +
       d.economics.map(e => `<tr>
