@@ -141,7 +141,7 @@ async function load() {
         const cl = p.refnet_placements?.refnet_leads;
         const amt = p.status === "paid" ? p.paid_usd : p.estimate_usd;
         return `<tr>
-        <td><span class="who">${esc(p.refnet_partner_agents?.full_name ?? "?")}</span></td>
+        <td><span class="who">${esc(p.refnet_partner_agents?.full_name ?? "?")}</span>${p.refnet_partner_agents?.payout_method ? `<div class="meta">pays via ${esc(p.refnet_partner_agents.payout_method.replace("_", " "))}${p.refnet_partner_agents.payout_details ? " · " + esc(p.refnet_partner_agents.payout_details.slice(0, 40)) : ""}</div>` : `<div class="meta">payout method not on file</div>`}</td>
         <td>${esc(cl ? (cl.first_name + " " + (cl.last_name ?? "")) : "")}</td>
         <td>${esc(p.memo ?? p.kind)}</td>
         <td class="money">${$(amt)}${p.is_estimate && p.status !== "paid" ? '<div class="meta">estimate</div>' : ""}</td>
