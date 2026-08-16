@@ -129,6 +129,7 @@ const MODULES = [
   { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
   { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
+  { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
   { id:"profile",   nav:"My Profile",match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
 ];
@@ -303,6 +304,44 @@ async function viewFeed() {
   clearInterval(window.__feedPoll);
   window.__feedPoll = setInterval(load, 10000);
 }
+
+/* ---------- AGENTS (partners + recruiting bench) ---------- */
+const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent", active:"lane-client", inactive:"hot" };
+async function viewAgents() {
+  V().innerHTML = `<h1>Agents</h1><div class="sub">Your showing partners and the recruiting bench. One tap per candidate — no bulk, ever.</div>
+    <div class="card"><h2>🤝 Showing partners</h2><div class="body" id="partners">Loading…</div></div>
+    <div class="card"><h2>🎯 Recruiting bench</h2><div class="body" id="bench">Loading…</div></div>`;
+  const d = await api("?section=agents");
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  document.getElementById("partners").innerHTML = (d.partners||[]).length ?
+    `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Status</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>` +
+    d.partners.map(p => `<tr>
+      <td><span class="whoName">${esc(p.full_name)}</span>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
+      <td><span class="kind ${PSTATUS[p.status]||""}">${esc(p.status||"?")}</span></td>
+      <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
+      <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
+      <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
+      <td>${p.showings_verified}/${p.showings_total}</td>
+      <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
+      <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
+    : `<div class="empty">No partners yet — recruit from the bench below.</div>`;
+  document.getElementById("bench").innerHTML = (d.recruiting||[]).length ?
+    d.recruiting.map(j => `<div class="row"><span class="whoName">${esc(j.gap_city)}</span> <span class="kind">${esc(j.status)}</span> <span class="meta">${j.candidates.length} candidates · opened ${et(j.created_at)}</span>
+      <div style="margin-top:6px">${j.candidates.map((c,i) => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed #f0f2f6">
+          <div style="flex:1"><span class="whoName">${esc(c.name)}</span><span class="meta"> ${esc(c.brokerage||"")}${c.volume?` · ${esc(String(c.volume))}`:""}${c.units_area?` · ${esc(String(c.units_area))} in area`:""}${c.source?` · ${esc(c.source)}`:""}</span></div>
+          ${c.contacted ? '<span class="kind lane-agent">contacted</span>' :
+            (ME.role==="admin" && c.phone ? `<button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick='startOutreach(${JSON.stringify(JSON.stringify({job_id:j.id,city:j.gap_city,name:c.name,phone:c.phone,brokerage:c.brokerage}))})'>💬 Text them</button>` : '<span class="meta">no phone</span>')}
+        </div>`).join("")}</div></div>`).join("")
+    : `<div class="empty">No open recruiting jobs.</div>`;
+}
+window.startOutreach = async (json) => {
+  const c = JSON.parse(json);
+  if (!confirm(`Send Tony's recruiting text to ${c.name} (${fmtPh(c.phone)}) for ${c.city}?\n\nThis is a REAL text to a REAL agent.`)) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"start_outreach", ...c }) });
+  alert(r.ok ? `Sent (${r.status}). The AI takes the conversation from here — watch Messages.` : ("Not sent: " + (r.error||"unknown")));
+  viewAgents();
+};
 
 /* ---------- MAP ---------- */
 function viewMap() {
