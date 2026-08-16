@@ -126,6 +126,7 @@ function renderLogin(err, notice) {
 
 /* ---------- SHELL + ROUTER (INRE MODULES pattern) ---------- */
 const MODULES = [
+  { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
   { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
@@ -138,6 +139,8 @@ function renderShell() {
   A().innerHTML = `<div class="top">
     <div class="nav">${MODULES.map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
+    ${ME.role==="admin" ? `<button id="bigpause" style="margin-right:12px;border-radius:999px;font-weight:800;background:#d23b34;box-shadow:0 1px 2px rgba(210,59,52,.35)">⏸ PAUSE ALL</button>` : ""}
+    <span id="modebadge" class="kind" style="margin-right:10px">…</span>
     <div style="position:relative">
       <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
       <div class="whodd" id="whodd">
@@ -150,6 +153,28 @@ function renderShell() {
   </div><div class="wrap" id="view">Loading…</div>`;
   document.getElementById("whoava").onclick = () => { const d = document.getElementById("whodd"); d.style.display = d.style.display === "block" ? "none" : "block"; };
   document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
+  refreshModeBadge();
+  const bp = document.getElementById("bigpause");
+  if (bp) bp.onclick = async () => {
+    const badge = document.getElementById("modebadge").textContent;
+    const goingLive = badge.includes("PAUSED");
+    const msg = goingLive
+      ? "Resume LIVE mode? Automated texts start flowing again immediately."
+      : "PAUSE ALL AUTOMATIONS? Every automated text stops instantly (calls & inbound still get logged). You can resume any time.";
+    if (!confirm(msg)) return;
+    const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_mode", value: goingLive ? "live" : "test" }) });
+    if (!r.ok) alert("Not changed: " + (r.error||"unknown"));
+    refreshModeBadge();
+  };
+}
+async function refreshModeBadge() {
+  try {
+    const d = await api("?section=feed");
+    const el = document.getElementById("modebadge"); if (!el) return;
+    const bp = document.getElementById("bigpause");
+    if (d.mode === "live") { el.textContent = "● LIVE"; el.style.background = "#e6f5ef"; el.style.color = "#15936a"; if (bp) bp.textContent = "⏸ PAUSE ALL"; }
+    else { el.textContent = "⏸ PAUSED"; el.style.background = "#fdf1dc"; el.style.color = "#b8770a"; if (bp) bp.textContent = "▶ RESUME LIVE"; }
+  } catch { /* badge is best-effort */ }
 }
 const V = () => document.getElementById("view");
 function route() {
@@ -242,6 +267,43 @@ async function loadThread(c, silent) {
 }
 window.useDraft = () => { if (window.__draft) { document.getElementById("cbody").value = window.__draft.text; } };
 
+/* ---------- LIVE FEED (go-live watch) ---------- */
+const FEEDLABEL = {
+  post_call_intro:"📲 Post-call text", vcard_followup:"👤 Contact card", tour_ack:"🏠 Tour request ack",
+  recruiting_outreach:"🤝 Recruiting text", recruiting_auto_reply:"🤖 AI negotiating", agreement_sent:"📄 Agreement sent",
+  signed_confirmation:"✍️ Signed!", payout_ask:"💳 Payout ask", payout_confirm:"💳 Payout set",
+  scheduling_window_ask:"📅 Asking availability", scheduling_confirm:"📅 Confirming time", intro:"🤝 Group intro",
+  good_luck:"🍀 Good-luck text", status_check:"❓ Status check", hot_escalation:"🔥 HOT page",
+  hot_sla_nudge:"🔥 SLA nudge", draft_approved_reply:"✅ Tony's reply", manual_app_send:"✅ Manual send",
+  optout_confirm:"🛑 Opt-out confirmed", task_reminder:"📋 Task reminder", call:"📞 Call", inbound:"⬅ They texted", outbound:"➡ Text",
+};
+async function viewFeed() {
+  V().innerHTML = `<h1>Live Feed</h1><div class="sub" id="feedsub">Everything the machine does, as it happens. Refreshes every 10 seconds.</div>
+    <div class="card"><h2>🆕 Newest leads</h2><div class="body" id="newleads">…</div></div>
+    <div class="card"><h2>⚡ Activity</h2><div class="body" id="feed">Loading…</div></div>`;
+  const load = async () => {
+    if (!location.hash.startsWith("#/feed")) { clearInterval(window.__feedPoll); window.__feedPoll = null; return; }
+    const d = await api("?section=feed");
+    refreshModeBadge();
+    const nl = document.getElementById("newleads"); if (!nl) return;
+    nl.innerHTML = (d.new_leads||[]).map(l =>
+      `<div class="row"><span class="whoName">${esc((l.first_name||"")+" "+(l.last_name||""))}</span>
+       <span class="kind">${esc(l.intent||"new")}</span> ${esc(l.first_inquiry_city||"")}
+       ${l.est_purchase_price?`· $${Number(l.est_purchase_price).toLocaleString()}`:""}
+       <span class="meta">${et(l.created_at)}</span></div>`).join("") || `<div class="empty">No leads yet.</div>`;
+    document.getElementById("feed").innerHTML = (d.feed||[]).map(f => {
+      const label = FEEDLABEL[f.type] || (f.dir==="in"?"⬅ "+f.type:"➡ "+f.type);
+      const st = f.status && f.status!=="sent" ? ` <span class="kind ${f.status==="blocked_allowlist"?"":"hot"}">${esc(f.status)}</span>` : "";
+      return `<div class="row"><span class="kind">${esc(label)}</span>
+        <span class="whoName">${esc(f.who||"")}</span>${st}
+        <div class="meta">"${esc(f.body)}"</div><div class="meta">${et(f.at)}</div></div>`;
+    }).join("") || `<div class="empty">Quiet so far — activity appears here the moment it happens.</div>`;
+  };
+  await load();
+  clearInterval(window.__feedPoll);
+  window.__feedPoll = setInterval(load, 10000);
+}
+
 /* ---------- MAP ---------- */
 function viewMap() {
   V().innerHTML = `<h1>Coverage Map</h1><div class="sub">Leads (blue) + partners (teal) with coverage circles.</div>
@@ -325,7 +387,7 @@ async function boot() {
     if (me.error) { renderLogin(me.error === "no_profile" ? "Your account isn't set up yet — ask Josh to add you." : "Sign in again."); return; }
     ME = me.user;
   } catch { return; }
-  if (!location.hash) location.hash = "#/dashboard";
+  if (!location.hash) location.hash = "#/feed";
   route();
 }
 sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_OUT") { SESSION=null; ME=null; renderLogin(); } else if (session) SESSION = session; });
