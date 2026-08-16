@@ -259,14 +259,56 @@ async function viewProfile() {
     </div></div>
     <div class="card"><h2>🔌 Integrations</h2><div class="body" id="ints">Checking live connections…</div></div>`;
   const d = await api("?section=integrations");
+  const adm = ME.role === "admin";
+  const KEYMAP = {
+    "RingCentral — Tony client line (248-278-4307)": ["refnet_rc_jwt", "Paste the new RingCentral JWT for the CLIENT line credential:"],
+    "RingCentral — admin (call log + recordings)": ["refnet_rc_admin_jwt", "Paste the new ADMIN RingCentral JWT:"],
+    "RingCentral — TJ recruiting line (248-663-1043)": ["refnet_rc_outreach_jwt", "Paste the new RingCentral JWT for the RECRUITING line credential:"],
+    "Follow Up Boss (Zillow leads)": ["refnet_fub_api_key", "Paste the new Follow Up Boss API key:"],
+  };
   let hh = "";
-  for (const [label, c] of Object.entries(d.checks||{}))
-    hh += `<div class="row"><span class="${c.ok?"ok":"bad"}">${c.ok?"●":"●"}</span> <span class="whoName" style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(c.note)}</span></div>`;
+  for (const [label, c] of Object.entries(d.checks||{})) {
+    const km = KEYMAP[label];
+    hh += `<div class="row"><span class="${c.ok?"ok":"bad"}">●</span> <span class="whoName" style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(c.note)}</span>
+      ${adm && km ? `<button class="btn ghost" style="float:right;padding:4px 10px;font-size:12px" onclick='updSetting(${JSON.stringify(km[0])},${JSON.stringify(km[1])})'>Update</button>` : ""}</div>`;
+  }
+  hh += `<div class="row"><span class="meta">Sending lines</span><div>client: <b>${esc(d.config?.client_line)}</b> · recruiting: <b>${esc(d.config?.outreach_line)}</b>
+    ${adm ? `<button class="btn ghost" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="updSetting('refnet_rc_sms_from','New CLIENT sending number (the line texts come from):')">Change client line</button>
+    <button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="updSetting('refnet_outreach_from','New RECRUITING sending number:')">Change recruiting line</button>` : ""}</div></div>`;
   for (const [label, s] of Object.entries(d.subscriptions||{}))
     hh += `<div class="row"><span class="${s==="active"?"ok":"bad"}">●</span> <span style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(s)}</span></div>`;
-  hh += `<div class="row"><span class="kind">mode: ${esc(d.mode)}</span><span class="kind">allowlist: ${d.allowlist_size} numbers${d.allowlist_size>0?" (test gate ON)":" (OPEN)"}</span></div>`;
+  hh += `<div class="row"><span class="kind">mode: ${esc(d.mode)}</span>
+    ${adm ? `<button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="toggleMode('${esc(d.mode)}')">${d.mode==="live"?"⏸ Switch to TEST (kill switch — stops all sends)":"▶ Switch to LIVE"}</button>` : ""}</div>`;
+  hh += `<div class="row"><span class="meta">Allowlist (test gate — only these numbers can receive texts; empty = fully open)</span>
+    <div>${(d.allowlist||[]).map(n=>`<span class="kind">${esc(n)}${adm?` <a href="#" onclick='rmAllow(${JSON.stringify(n)});return false' style="color:var(--red)">✕</a>`:""}</span>`).join("") || '<span class="kind hot">EMPTY — sends are OPEN to anyone</span>'}
+    ${adm ? `<button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="addAllow()">+ Add number</button>` : ""}</div></div>`;
   document.getElementById("ints").innerHTML = hh;
+  window.__allow = d.allowlist || [];
 }
+window.updSetting = async (key, promptText) => {
+  const v = prompt(promptText); if (v === null || !v.trim()) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key, value: v.trim() }) });
+  alert(r.ok ? "Saved. Health will re-check on reload." : ("Not saved: " + (r.error||"unknown"))); viewProfile();
+};
+window.toggleMode = async (cur) => {
+  const next = cur === "live" ? "test" : "live";
+  if (!confirm(next === "test" ? "Switch to TEST mode? Every outbound text stops immediately (this is the kill switch)." : "Switch to LIVE mode? Sends resume, still limited to the allowlist below.")) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_mode", value: next }) });
+  if (!r.ok) alert("Not changed: " + (r.error||"unknown")); viewProfile();
+};
+window.addAllow = async () => {
+  const n = prompt("Phone number to ADD to the allowlist (e.g. 2485551234):"); if (!n) return;
+  const next = [...window.__allow, n.trim()];
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_sms_allowlist", value: JSON.stringify(next) }) });
+  if (!r.ok) alert("Not saved: " + (r.error||"unknown")); viewProfile();
+};
+window.rmAllow = async (n) => {
+  if (!confirm("Remove " + n + " from the allowlist?")) return;
+  const next = window.__allow.filter(x => x !== n);
+  if (next.length === 0 && !confirm("⚠ That empties the allowlist — in LIVE mode, texts could then go to ANY real number (go-live). Are you sure?")) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_sms_allowlist", value: JSON.stringify(next) }) });
+  if (!r.ok) alert("Not saved: " + (r.error||"unknown")); viewProfile();
+};
 window.changePw = async () => {
   const p = prompt("New password (min 8 chars):"); if (!p) return;
   const { error } = await sb.auth.updateUser({ password: p });
