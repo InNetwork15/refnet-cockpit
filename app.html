@@ -25,7 +25,7 @@ body{margin:0;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .who b{color:var(--brand);display:block;font-weight:700}
 .ava{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--brand);background:var(--brand);color:#fff;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.5px}
 .wrap{max-width:1280px;margin:0 auto;padding:18px 22px}
-h1{font-size:24px;margin:0 0 3px;font-weight:800;letter-spacing:-.02em;color:var(--brand)}
+h1{font-size:24px;margin:0 0 3px;font-weight:780;letter-spacing:-.02em;color:var(--brand)}
 .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px}
 .card h2{font-size:14px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f4;font-weight:700;color:var(--brand)}
@@ -50,11 +50,14 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
 .badge{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin:1px 4px 1px 0}
 .b-title{background:#e3ecfb;color:#1a56b0}.b-mortgage{background:#e6f5ef;color:var(--green)}
 .b-insurance{background:#fdf1dc;color:var(--amber)}.b-listing{background:#f1e9fb;color:var(--purple)}
-/* login */
-.loginbox{max-width:380px;margin:9vh auto;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);padding:30px 32px}
-.loginbox h1{text-align:center;font-size:20px}
-.loginbox label{font-size:12px;font-weight:600;color:#516074;display:block;margin:12px 0 4px}
-.err{color:var(--red);font-size:13px;margin-top:10px;min-height:18px}
+/* login — INRE's exact card */
+.login{max-width:380px;margin:10vh auto;background:#fff;border:1px solid var(--line);border-radius:20px;padding:32px;box-shadow:var(--shadow-lg)}
+.login h2{margin:0 0 4px;font-size:21px;color:var(--brand);font-weight:780;letter-spacing:-.01em}
+.login p{color:var(--muted);font-size:13px;margin:0 0 18px}
+.login input{width:100%;padding:12px 13px;border:1px solid #dbe1ea;border-radius:11px;font-size:14px;margin-bottom:11px;font-family:inherit}
+.err{background:#fdecea;color:#a11d0c;padding:11px 13px;border-radius:10px;font-size:13px;margin-bottom:10px}
+.notice{background:#e6f7ec;border:1px solid #34a853;color:#1e7e34;padding:11px 13px;border-radius:10px;font-size:13px;margin-bottom:10px}
+.whodd{display:none;position:absolute;right:0;top:42px;background:#fff;border:1px solid #e3e8f2;border-radius:12px;box-shadow:0 10px 34px rgba(21,41,74,.18);padding:12px 14px;min-width:210px;z-index:900}
 /* messages */
 .msgshell{display:flex;gap:14px;height:calc(100vh - 210px);min-height:420px}
 .convlist{width:330px;flex:none;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow-y:auto}
@@ -92,29 +95,32 @@ async function api(qs, opts) {
 }
 
 /* ---------- LOGIN (INRE pattern) ---------- */
-function renderLogin(msg) {
-  A().innerHTML = `<div class="loginbox">
-    <h1><span style="color:var(--brand)">In Network</span> <span style="color:var(--blue)">RefNet</span></h1>
-    <div class="sub" style="text-align:center">Sign in with your platform account</div>
-    <label>Email</label><input id="em" type="email" autocomplete="username">
-    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
-    <div class="err" id="err">${esc(msg||"")}</div>
-    <button id="go" style="width:100%">Sign in</button>
-    <div style="text-align:center;margin-top:12px"><a href="#" id="forgot" style="color:var(--blue);font-size:12.5px">Forgot password?</a></div>
-  </div>`;
-  const go = async () => {
-    document.getElementById("err").textContent = "";
-    const { data, error } = await sb.auth.signInWithPassword({ email: em.value.trim(), password: pw.value });
-    if (error) { document.getElementById("err").textContent = error.message; return; }
-    SESSION = data.session; boot();
-  };
-  document.getElementById("go").onclick = go;
-  document.getElementById("pw").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
-  document.getElementById("forgot").onclick = async (e) => {
+function renderLogin(err, notice) {
+  A().innerHTML = `
+   <div class="login">
+     <h2>In Network <span style="color:#2563eb">Real Estate</span></h2>
+     <p>Referral Network — sign in</p>
+     ${err?`<div class="err">${esc(err)}</div>`:""}
+     ${notice?`<div class="notice">${esc(notice)}</div>`:""}
+     <form id="loginform" autocomplete="on" style="display:flex;flex-direction:column;gap:10px;margin:0">
+       <input id="email" name="email" type="email" placeholder="you@innetworkrealestate.com" autocomplete="username" autofocus/>
+       <input id="pw" name="password" type="password" placeholder="Password" autocomplete="current-password"/>
+       <button class="btn" id="loginbtn" type="submit">Sign in</button>
+     </form>
+     <div style="text-align:center;margin-top:12px"><a id="forgotlink" style="cursor:pointer;color:#2563eb;font-size:13px">Forgot password?</a></div>
+   </div>`;
+  document.getElementById("loginform").addEventListener("submit", async function(e){
     e.preventDefault();
-    const email = em.value.trim(); if (!email) { document.getElementById("err").textContent = "Enter your email first."; return; }
-    await sb.auth.resetPasswordForEmail(email);
-    document.getElementById("err").textContent = "Reset email sent (check spam).";
+    const btn = document.getElementById("loginbtn"); btn.textContent = "Signing in…"; btn.disabled = true;
+    const { data, error } = await sb.auth.signInWithPassword({ email: document.getElementById("email").value.trim().toLowerCase(), password: document.getElementById("pw").value });
+    if (error) { renderLogin(error.message); return; }
+    SESSION = data.session; boot();
+  });
+  document.getElementById("forgotlink").onclick = async () => {
+    let email = (document.getElementById("email").value||"").trim().toLowerCase();
+    if (!email) { email = (prompt("Enter your account email to get a password-reset link:")||"").trim().toLowerCase(); if (!email) return; }
+    const r = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+    renderLogin(r.error ? ("Reset error: " + r.error.message) : null, r.error ? null : ("A password-reset link was sent to " + email + ". Check your email (and spam)."));
   };
 }
 
@@ -128,14 +134,22 @@ const MODULES = [
 function renderShell() {
   const h = location.hash || "#/dashboard";
   const initials = (ME.full_name||ME.email||"??").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  // INRE's shell: nav-first (no brand block), avatar with dropdown (My Profile / Sign out)
   A().innerHTML = `<div class="top">
-    <div class="brand">In Network <span>RefNet</span></div>
     <div class="nav">${MODULES.map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
-    <div class="who"><b>${esc(ME.full_name||ME.email)}</b>${esc(ME.role)}</div>
-    <button class="ava" id="signout" title="Sign out">${esc(initials)}</button>
+    <div style="position:relative">
+      <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
+      <div class="whodd" id="whodd">
+        <div style="font-size:12.5px;font-weight:700;color:var(--brand)">${esc(ME.full_name||ME.email)}</div>
+        <div class="meta" style="margin:2px 0 10px">${esc(ME.role)}</div>
+        <a href="#/profile" class="btn ghost" style="display:block;width:100%;text-align:center;box-sizing:border-box;margin-bottom:7px;text-decoration:none" onclick="document.getElementById('whodd').style.display='none'">My Profile</a>
+        <button class="btn ghost" id="signout" style="width:100%">Sign out</button>
+      </div>
+    </div>
   </div><div class="wrap" id="view">Loading…</div>`;
-  document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin("Signed out."); };
+  document.getElementById("whoava").onclick = () => { const d = document.getElementById("whodd"); d.style.display = d.style.display === "block" ? "none" : "block"; };
+  document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
 }
 const V = () => document.getElementById("view");
 function route() {
