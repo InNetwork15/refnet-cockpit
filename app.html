@@ -1,0 +1,279 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RefNet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+:root{
+  --bg:#f4f6f9;--card:#fff;--line:#e8ebf1;--ink:#16202e;--muted:#667488;
+  --blue:#2f6fed;--brand:#15294a;--accent:#0fb5a6;--green:#15936a;--amber:#b8770a;--purple:#7c3aed;--red:#d23b34;
+  --shadow:0 1px 2px rgba(16,32,64,.05),0 2px 8px rgba(16,32,64,.05);
+  --shadow-lg:0 10px 30px rgba(16,32,64,.12);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
+.top{background:rgba(255,255,255,.92);backdrop-filter:saturate(180%) blur(8px);display:flex;align-items:center;gap:4px;padding:0 22px;height:60px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50}
+.brand{font-weight:800;font-size:16px;letter-spacing:-.01em;color:var(--brand);margin-right:14px}
+.brand span{color:var(--blue)}
+.nav a{display:inline-flex;align-items:center;height:60px;padding:0 14px;color:#516074;font-weight:600;font-size:13.5px;text-decoration:none;border-bottom:2.5px solid transparent}
+.nav a.on{color:var(--brand);border-bottom-color:var(--blue)}
+.spacer{flex:1}
+.who{font-size:12px;color:#6b7787;text-align:right;line-height:1.3;margin-right:10px}
+.who b{color:var(--brand);display:block;font-weight:700}
+.ava{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--brand);background:var(--brand);color:#fff;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.5px}
+.wrap{max-width:1280px;margin:0 auto;padding:18px 22px}
+h1{font-size:24px;margin:0 0 3px;font-weight:800;letter-spacing:-.02em;color:var(--brand)}
+.sub{color:var(--muted);font-size:13px;margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px}
+.card h2{font-size:14px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f4;font-weight:700;color:var(--brand)}
+.card .body{padding:10px 18px 14px}
+.row{padding:9px 0;border-top:1px solid #f0f2f6}.row:first-child{border-top:none}
+.whoName{font-weight:600;color:var(--brand)}
+.meta{color:var(--muted);font-size:12px}
+button,.btn{background:var(--blue);color:#fff;border:none;border-radius:10px;padding:9px 15px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(47,111,237,.28)}
+button:hover{filter:brightness(1.06)}
+.btn.ghost{background:#fff;border:1px solid var(--line);color:#41506a;box-shadow:none}
+input,textarea{font:inherit;border:1px solid var(--line);border-radius:10px;padding:9px 12px;width:100%}
+.kind{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:#eef1f6;color:#52617a;margin-right:6px}
+.kind.hot{background:#fbe9e8;color:var(--red)}
+.lane-client{background:#e3ecfb;color:#1a56b0}.lane-agent{background:#e6f5ef;color:var(--green)}
+.ok{color:var(--green);font-weight:700}.bad{color:var(--red);font-weight:700}
+.empty{color:var(--muted);font-style:italic;padding:10px 0}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:10px 8px;font-size:13px;border-bottom:1px solid #f0f2f6;vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;font-weight:700;background:#fbfcfe}
+.money{font-variant-numeric:tabular-nums;text-align:right}th.money{text-align:right}
+.net{font-weight:700;color:var(--green)}
+.badge{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin:1px 4px 1px 0}
+.b-title{background:#e3ecfb;color:#1a56b0}.b-mortgage{background:#e6f5ef;color:var(--green)}
+.b-insurance{background:#fdf1dc;color:var(--amber)}.b-listing{background:#f1e9fb;color:var(--purple)}
+/* login */
+.loginbox{max-width:380px;margin:9vh auto;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-lg);padding:30px 32px}
+.loginbox h1{text-align:center;font-size:20px}
+.loginbox label{font-size:12px;font-weight:600;color:#516074;display:block;margin:12px 0 4px}
+.err{color:var(--red);font-size:13px;margin-top:10px;min-height:18px}
+/* messages */
+.msgshell{display:flex;gap:14px;height:calc(100vh - 210px);min-height:420px}
+.convlist{width:330px;flex:none;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow-y:auto}
+.convrow{padding:11px 14px;border-bottom:1px solid #f0f2f6;cursor:pointer}
+.convrow:hover{background:#f5f9ff}.convrow.sel{background:#eef4ff}
+.thread{flex:1;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);display:flex;flex-direction:column;overflow:hidden}
+.thhead{padding:12px 16px;border-bottom:1px solid #eef0f4;display:flex;align-items:center;gap:10px}
+#msgs{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:8px}
+.bub{max-width:70%;padding:8px 12px;border-radius:12px;background:#eef1f6;align-self:flex-start;font-size:13.5px;white-space:pre-wrap;word-break:break-word}
+.bub.out{background:var(--blue);color:#fff;align-self:flex-end}
+.bub .meta{display:block;margin-top:3px;font-size:10.5px;color:inherit;opacity:.7}
+.draftbar{background:#e9f9f2;border-top:1px solid #d4f0e2;padding:10px 14px;font-size:13px}
+.comp{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #eef0f4}
+.comp textarea{resize:none;height:60px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
+const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
+const API = SUPABASE_URL + "/functions/v1/refnet-app";
+const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+let SESSION = null, ME = null;
+const A = () => document.getElementById("app");
+const et = (s) => s ? new Date(s).toLocaleString("en-US", { timeZone: "America/Detroit", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : "";
+const esc = (s) => (s ?? "").toString().replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmtPh = (p) => { const d = (p||"").replace(/\D/g,"").replace(/^1/,""); return d.length===10 ? `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}` : (p||""); };
+
+async function api(qs, opts) {
+  const r = await fetch(API + qs, { ...(opts||{}), headers: { Authorization: "Bearer " + SESSION.access_token, "Content-Type": "application/json", ...(opts&&opts.headers||{}) } });
+  if (r.status === 401) { renderLogin("Session expired — sign in again."); throw new Error("401"); }
+  return r.json();
+}
+
+/* ---------- LOGIN (INRE pattern) ---------- */
+function renderLogin(msg) {
+  A().innerHTML = `<div class="loginbox">
+    <h1><span style="color:var(--brand)">In Network</span> <span style="color:var(--blue)">RefNet</span></h1>
+    <div class="sub" style="text-align:center">Sign in with your platform account</div>
+    <label>Email</label><input id="em" type="email" autocomplete="username">
+    <label>Password</label><input id="pw" type="password" autocomplete="current-password">
+    <div class="err" id="err">${esc(msg||"")}</div>
+    <button id="go" style="width:100%">Sign in</button>
+    <div style="text-align:center;margin-top:12px"><a href="#" id="forgot" style="color:var(--blue);font-size:12.5px">Forgot password?</a></div>
+  </div>`;
+  const go = async () => {
+    document.getElementById("err").textContent = "";
+    const { data, error } = await sb.auth.signInWithPassword({ email: em.value.trim(), password: pw.value });
+    if (error) { document.getElementById("err").textContent = error.message; return; }
+    SESSION = data.session; boot();
+  };
+  document.getElementById("go").onclick = go;
+  document.getElementById("pw").addEventListener("keydown", e => { if (e.key === "Enter") go(); });
+  document.getElementById("forgot").onclick = async (e) => {
+    e.preventDefault();
+    const email = em.value.trim(); if (!email) { document.getElementById("err").textContent = "Enter your email first."; return; }
+    await sb.auth.resetPasswordForEmail(email);
+    document.getElementById("err").textContent = "Reset email sent (check spam).";
+  };
+}
+
+/* ---------- SHELL + ROUTER (INRE MODULES pattern) ---------- */
+const MODULES = [
+  { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
+  { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
+  { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
+  { id:"profile",   nav:"My Profile",match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
+];
+function renderShell() {
+  const h = location.hash || "#/dashboard";
+  const initials = (ME.full_name||ME.email||"??").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
+  A().innerHTML = `<div class="top">
+    <div class="brand">In Network <span>RefNet</span></div>
+    <div class="nav">${MODULES.map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
+    <div class="spacer"></div>
+    <div class="who"><b>${esc(ME.full_name||ME.email)}</b>${esc(ME.role)}</div>
+    <button class="ava" id="signout" title="Sign out">${esc(initials)}</button>
+  </div><div class="wrap" id="view">Loading…</div>`;
+  document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin("Signed out."); };
+}
+const V = () => document.getElementById("view");
+function route() {
+  const h = location.hash || "#/dashboard";
+  const m = MODULES.find(m => m.match(h)) || MODULES[0];
+  clearInterval(window.__msgPoll); window.__msgPoll = null;
+  renderShell(); m.render();
+}
+window.addEventListener("hashchange", route);
+
+/* ---------- DASHBOARD (the cockpit cards, behind login) ---------- */
+async function viewDashboard() {
+  V().innerHTML = `<h1>Dashboard</h1><div class="sub" id="stamp">loading…</div><div id="d"></div>`;
+  const d = await api("");
+  document.getElementById("stamp").textContent = "as of " + d.generated_et + " ET";
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  let hh = "";
+  hh += `<div class="card"><h2>🚨 Open alerts (${d.alerts.length})</h2><div class="body">` + (d.alerts.length ? d.alerts.slice(0,12).map(a =>
+    `<div class="row"><span class="kind ${a.kind.includes("hot")?"hot":""}">${esc(a.kind)}</span>${esc(a.message)}
+     <div class="meta">${et(a.created_at)} · <a href="#" onclick="resolveAlert('${a.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
+    + (d.alerts.length>12?`<div class="meta" style="padding-top:8px">+ ${d.alerts.length-12} more</div>`:"") : `<div class="empty">All clear.</div>`) + `</div></div>`;
+  hh += `<div class="card"><h2>💵 Pay queue</h2><div class="body">` + (d.payables?.length ?
+    `<div style="overflow-x:auto"><table><tr><th>Partner</th><th>For</th><th class="money">Amount</th><th>Status</th><th></th></tr>` +
+    d.payables.map(p => `<tr><td><span class="whoName">${esc(p.refnet_partner_agents?.full_name??"?")}</span>${p.refnet_partner_agents?.payout_method?`<div class="meta">pays via ${esc(p.refnet_partner_agents.payout_method.replace("_"," "))}</div>`:`<div class="meta">payout method not on file</div>`}</td>
+      <td>${esc(p.memo??p.kind)}</td><td class="money">${$(p.status==="paid"?p.paid_usd:p.estimate_usd)}${p.is_estimate&&p.status!=="paid"?'<div class="meta">estimate</div>':""}</td>
+      <td><span class="kind${p.status==="pending_approval"?" hot":""}">${esc(p.status.replace("_"," "))}</span></td>
+      <td>${p.status==="pending_approval"?`<button onclick="approvePayable('${p.id}',${!!p.is_estimate})">Approve</button>`:p.status==="approved"?`<button onclick="markPaid('${p.id}')">Mark paid</button>`:""}</td></tr>`).join("") + `</table></div>` : `<div class="empty">Nothing owed.</div>`) + `</div></div>`;
+  hh += `<div class="card"><h2>💰 Deal economics (projected)</h2><div class="body">` + (d.economics?.length ?
+    `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">Price</th><th class="money">GCI</th><th class="money">Net to us</th></tr>` +
+    d.economics.map(e => `<tr><td><span class="whoName">${esc(e.client)}</span>${e.partner?`<div class="meta">via ${esc(e.partner)}</div>`:""}</td>
+      <td>${e.badges.title?'<span class="badge b-title">TITLE</span>':""}${e.badges.mortgage?'<span class="badge b-mortgage">MORTGAGE</span>':""}${e.badges.insurance?'<span class="badge b-insurance">INSURANCE</span>':""}${e.badges.listing?'<span class="badge b-listing">LISTING</span>':""}</td>
+      <td><span class="kind">${esc(e.status)}</span></td><td class="money">${$(e.est_purchase_price)}</td><td class="money">${$(e.gci)}</td><td class="money net">${$(e.projected_net)}</td></tr>`).join("") + `</table></div>
+    <div class="meta" style="margin-top:8px">Assumptions: ${d.financials_config.buyer_commission_pct}% GCI · $${d.financials_config.broker_fee_flat} broker fee (placeholders until Josh's real numbers).</div>` : `<div class="empty">No deals in motion with a price set.</div>`) + `</div></div>`;
+  hh += `<div class="card"><h2>🏆 Partner scorecard</h2><div class="body">` + (d.scorecard.length ?
+    `<table><tr><th>Partner</th><th>Shown</th><th>Great</th><th>No-shows</th><th class="money">Est. fees</th></tr>` +
+    d.scorecard.map(s => `<tr><td>${esc(s.full_name)}</td><td>${s.showings_verified}/${s.showings_total}</td><td>${s.great_showings}</td><td>${s.no_shows}</td><td class="money">$${(+s.est_fees_earned_usd).toFixed(0)}</td></tr>`).join("") + `</table>` : `<div class="empty">No partners yet.</div>`) + `</div></div>`;
+  document.getElementById("d").innerHTML = hh;
+}
+window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); viewDashboard(); };
+window.approvePayable = async (id, isEst) => {
+  let actual = null;
+  if (isEst) { const v = prompt("This amount is an ESTIMATE. Enter the ACTUAL amount (blank = approve estimate):"); if (v === null) return; if (v.trim() !== "") actual = Number(v); }
+  await api("", { method:"POST", body: JSON.stringify({ action:"approve_payable", payable_id:id, actual_usd:actual }) }); viewDashboard();
+};
+window.markPaid = async (id) => { if (confirm("Mark PAID? (Record-keeping — actual payment is made by a human through the broker.)")) { await api("", { method:"POST", body: JSON.stringify({ action:"mark_paid", payable_id:id }) }); viewDashboard(); } };
+
+/* ---------- MESSAGES (INRE two-way SMS widget pattern) ---------- */
+let SELCONV = null, THREADSIG = "";
+async function viewMessages() {
+  V().innerHTML = `<h1>Messages</h1><div class="sub">RingCentral — client line (Tony 248-278-4307) + recruiting line (TJ 248-663-1043). AI drafts appear below the thread for one-tap send.</div>
+    <div class="msgshell"><div class="convlist" id="convlist">Loading…</div>
+    <div class="thread" id="thread"><div class="empty" style="padding:20px">Pick a conversation.</div></div></div>`;
+  await refreshConvs();
+  window.__msgPoll = setInterval(async () => {
+    if (!location.hash.startsWith("#/messages")) { clearInterval(window.__msgPoll); window.__msgPoll = null; return; }
+    await refreshConvs(true);
+    if (SELCONV) loadThread(SELCONV, true);
+  }, 8000);
+}
+async function refreshConvs(silent) {
+  const d = await api("?section=conversations");
+  const el = document.getElementById("convlist"); if (!el) return;
+  el.innerHTML = (d.conversations||[]).map(c => `<div class="convrow ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick='openConv(${JSON.stringify(JSON.stringify(c))})'>
+    <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> <span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting":"client"}</span>
+    <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("") || `<div class="empty" style="padding:14px">No conversations yet.</div>`;
+}
+window.openConv = (json) => { SELCONV = JSON.parse(json); THREADSIG = ""; refreshConvs(true); loadThread(SELCONV); };
+async function loadThread(c, silent) {
+  const d = await api("?section=thread&phone=" + encodeURIComponent(c.key));
+  const sig = (d.messages||[]).length + ":" + (d.messages?.[0]?.id||"") + ":" + (d.draft?.comm_id||"");
+  if (silent && sig === THREADSIG) return;
+  THREADSIG = sig;
+  const th = document.getElementById("thread"); if (!th) return;
+  th.innerHTML = `<div class="thhead"><span class="whoName">${esc(c.name || fmtPh(c.key))}</span>
+      <span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting lane — TJ's line":"client lane — Tony's line"}</span>
+      <span class="meta">${fmtPh(c.key)}</span></div>
+    <div id="msgs">${(d.messages||[]).slice().reverse().map(m => `<div class="bub ${m.direction==="out"?"out":""}">${esc(m.body)}<span class="meta">${et(m.occurred_at)}${m.ai_extraction?.send_status&&m.ai_extraction.send_status!=="sent"?" · "+esc(m.ai_extraction.send_status):""}</span></div>`).join("")}</div>
+    ${d.draft ? `<div class="draftbar">🤖 <b>AI draft ready:</b> “${esc(d.draft.text)}” <button class="btn ghost" style="margin-left:8px" onclick="useDraft()">Use draft</button></div>` : ""}
+    <div class="comp"><textarea id="cbody" placeholder="Type a message…"></textarea><button id="csend">Send</button></div>`;
+  const msgs = document.getElementById("msgs"); msgs.scrollTop = msgs.scrollHeight;
+  window.__draft = d.draft;
+  document.getElementById("csend").onclick = async () => {
+    const text = document.getElementById("cbody").value.trim(); if (!text) return;
+    const usingDraft = window.__draft && text === window.__draft.text;
+    document.getElementById("csend").disabled = true;
+    const r = await api("", { method:"POST", body: JSON.stringify({ action:"send_message", to_phone:c.key, text, lane:c.lane, draft_comm_id: usingDraft ? window.__draft.comm_id : null }) });
+    if (r.status && r.status !== "sent") alert("Not sent: " + r.status + (r.status==="blocked_allowlist"?" (allowlist is still on — go-live gate)":""));
+    THREADSIG = ""; loadThread(c);
+  };
+}
+window.useDraft = () => { if (window.__draft) { document.getElementById("cbody").value = window.__draft.text; } };
+
+/* ---------- MAP ---------- */
+function viewMap() {
+  V().innerHTML = `<h1>Coverage Map</h1><div class="sub">Leads (blue) + partners (teal) with coverage circles.</div>
+    <div class="card" style="height:calc(100vh - 230px);min-height:420px"><iframe src="map.html#${MAP_VIEW_TOKEN}" style="width:100%;height:100%;border:0"></iframe></div>`;
+}
+
+/* ---------- PROFILE (INRE profile + connections pattern) ---------- */
+async function viewProfile() {
+  V().innerHTML = `<h1>My Profile</h1><div class="sub">Account + connected integrations</div>
+    <div class="card"><h2>Identity</h2><div class="body">
+      <div class="row"><span class="meta">Name</span><div class="whoName">${esc(ME.full_name||"")}</div></div>
+      <div class="row"><span class="meta">Email</span><div>${esc(ME.email||"")}</div></div>
+      <div class="row"><span class="meta">Role</span><div><span class="kind">${esc(ME.role)}</span></div></div>
+      <div class="row"><button class="btn ghost" onclick="changePw()">Change password</button></div>
+    </div></div>
+    <div class="card"><h2>🔌 Integrations</h2><div class="body" id="ints">Checking live connections…</div></div>`;
+  const d = await api("?section=integrations");
+  let hh = "";
+  for (const [label, c] of Object.entries(d.checks||{}))
+    hh += `<div class="row"><span class="${c.ok?"ok":"bad"}">${c.ok?"●":"●"}</span> <span class="whoName" style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(c.note)}</span></div>`;
+  for (const [label, s] of Object.entries(d.subscriptions||{}))
+    hh += `<div class="row"><span class="${s==="active"?"ok":"bad"}">●</span> <span style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(s)}</span></div>`;
+  hh += `<div class="row"><span class="kind">mode: ${esc(d.mode)}</span><span class="kind">allowlist: ${d.allowlist_size} numbers${d.allowlist_size>0?" (test gate ON)":" (OPEN)"}</span></div>`;
+  document.getElementById("ints").innerHTML = hh;
+}
+window.changePw = async () => {
+  const p = prompt("New password (min 8 chars):"); if (!p) return;
+  const { error } = await sb.auth.updateUser({ password: p });
+  alert(error ? error.message : "Password changed.");
+};
+
+/* ---------- BOOT ---------- */
+async function boot() {
+  const { data } = await sb.auth.getSession();
+  if (!data.session) { renderLogin(); return; }
+  SESSION = data.session;
+  try {
+    const me = await api("?whoami=1");
+    if (me.error) { renderLogin(me.error === "no_profile" ? "Your account isn't set up yet — ask Josh to add you." : "Sign in again."); return; }
+    ME = me.user;
+  } catch { return; }
+  if (!location.hash) location.hash = "#/dashboard";
+  route();
+}
+sb.auth.onAuthStateChange((ev, session) => { if (ev === "SIGNED_OUT") { SESSION=null; ME=null; renderLogin(); } else if (session) SESSION = session; });
+boot();
+</script>
+</body>
+</html>
