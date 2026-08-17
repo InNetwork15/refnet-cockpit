@@ -85,6 +85,19 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
 .statebar.needs{background:#fdf1dc;color:#8a5a00}
 .statebar.answered{background:#e9f9f2;color:var(--green)}
 .statebar.waiting{background:#f5f7fa;color:#52617a}
+/* leads by ZIP */
+.zchips{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px}
+.zchips button{background:#fff;border:1px solid #dbe1ea;color:#41506a;box-shadow:none;font-weight:600;padding:7px 13px;border-radius:999px}
+.zchips button b{margin-left:6px;color:var(--muted);font-weight:800}
+.zchips button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.zchips button.on b{color:#dce8ff}
+.ztiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
+.ztile{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:12px 15px}
+.ztile span{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;font-weight:700}
+.ztile b{display:block;font-size:26px;font-weight:800;color:var(--brand);letter-spacing:-.02em;line-height:1.25}
+.ztile em{font-style:normal;font-size:12px;color:var(--muted)}
+td.zon,th.zon{background:#eef4ff}
+th.zon{color:var(--blue)}
 .comp{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #eef0f4}
 .comp textarea{resize:none;height:60px}
 </style>
@@ -146,6 +159,7 @@ const MODULES = [
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
+  { id:"zips",      nav:"Leads by ZIP", match: h => h.startsWith("#/zips"),   render: () => viewZips() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
   { id:"profile",   nav:"My Profile",match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
 ];
@@ -551,6 +565,114 @@ window.startOutreach = async (json) => {
 };
 
 /* ---------- MAP ---------- */
+/* ---------- LEADS BY ZIP (Josh 2026-08-17) ----------
+   Where the lead flow actually comes from, and whether it's moving. One fetch carries every
+   window (7/10/30/90/365/all), so the filter chips re-draw the map and re-sort the table
+   instantly — no reload, no second round trip. Hover a bubble to see that ZIP's count. */
+const ZWIN = [["7d","Last 7 days"],["10d","Last 10 days"],["30d","Last 30 days"],["90d","Last 90 days"],["365d","Last year"],["all","All time"]];
+let ZSEL = "30d", ZMAP = null, ZLAYER = null, ZSORT = "count";
+const zapi = (qs) => api("?fn=zips" + qs);
+function loadLeaflet() {
+  if (window.L) return Promise.resolve();
+  return new Promise((res, rej) => {
+    const css = document.createElement("link");
+    css.rel = "stylesheet"; css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(css);
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    s.onload = res; s.onerror = rej; document.head.appendChild(s);
+  });
+}
+async function viewZips() {
+  V().innerHTML = `<h1>Leads by ZIP</h1>
+    <div class="sub" id="zsub">Loading lead geography…</div>
+    <div class="zchips" id="zchips"></div>
+    <div id="ztiles" class="ztiles"></div>
+    <div class="card"><h2>🗺️ Where the leads are — hover a bubble</h2>
+      <div class="body" style="padding:0"><div id="zmap" style="height:440px;border-radius:0 0 16px 16px"></div></div></div>
+    <div class="card"><h2>📋 Every ZIP, every window</h2><div class="body" id="ztable">…</div></div>`;
+  const d = await zapi("&section=zip_report");
+  window.__zips = d;
+  document.getElementById("zsub").innerHTML =
+    `${d.zip_count} ZIP codes have sent us leads. Counts are by the date the lead came in (Eastern).
+     ${d.unzipped ? `<b>${d.unzipped}</b> lead${d.unzipped===1?"":"s"} not on the map yet — no usable location on the record.` : "Every lead is placed."}
+     <span class="meta">Generated ${esc(d.generated_et||"")}</span>`;
+  drawZChips(); await drawZMap(); drawZTable();
+}
+function drawZChips() {
+  document.getElementById("zchips").innerHTML = ZWIN.map(([k, label]) =>
+    `<button class="${ZSEL===k?"on":""}" onclick="setZWin('${k}')">${label}
+      <b>${(window.__zips.totals||{})[k] ?? 0}</b></button>`).join("");
+}
+window.setZWin = async (k) => { ZSEL = k; drawZChips(); await drawZMap(); drawZTable(); };
+window.setZSort = (s) => { ZSORT = s; drawZTable(); };
+async function drawZMap() {
+  const rows = (window.__zips.zips || []).filter(z => z.lat != null && z.lng != null);
+  try { await loadLeaflet(); } catch (e) {
+    document.getElementById("zmap").innerHTML = `<div class="empty" style="padding:20px">Map library didn't load — the table below still works.</div>`;
+    return;
+  }
+  if (!ZMAP) {
+    ZMAP = L.map("zmap", { scrollWheelZoom: false }).setView([44.3, -85.4], 6);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap", maxZoom: 18 }).addTo(ZMAP);
+  }
+  if (ZLAYER) ZMAP.removeLayer(ZLAYER);
+  ZLAYER = L.layerGroup().addTo(ZMAP);
+  const live = rows.filter(z => (z.counts[ZSEL] || 0) > 0);
+  const max = Math.max(1, ...live.map(z => z.counts[ZSEL] || 0));
+  for (const z of rows) {
+    const n = z.counts[ZSEL] || 0;
+    const hot = n > 0;
+    // area ∝ count, so ten leads looks like ten — not like a hundred
+    const radius = hot ? 8 + 22 * Math.sqrt(n / max) : 4;
+    const label = `<b>${z.zip}</b>${z.city?" — "+esc(z.city):""}<br>
+      <b style="font-size:15px">${n}</b> lead${n===1?"":"s"} · ${esc(ZWIN.find(w=>w[0]===ZSEL)[1].toLowerCase())}
+      <br><span style="color:#667488">${z.counts.all} all time${z.county?" · "+esc(z.county)+" County":""}</span>`;
+    L.circleMarker([z.lat, z.lng], {
+      radius, weight: hot ? 2 : 1,
+      color: hot ? "#2f6fed" : "#b8c2d4", fillColor: hot ? "#2f6fed" : "#d8dee9",
+      fillOpacity: hot ? 0.42 : 0.3,
+    }).bindTooltip(label, { direction: "top", sticky: true }).bindPopup(label).addTo(ZLAYER);
+  }
+  if (live.length) {
+    try { ZMAP.fitBounds(L.latLngBounds(live.map(z => [z.lat, z.lng])).pad(0.25)); } catch (e) { /* single point */ }
+  }
+  const top = [...live].sort((a,b) => b.counts[ZSEL]-a.counts[ZSEL])[0];
+  document.getElementById("ztiles").innerHTML = `
+    <div class="ztile"><span>Leads · ${esc(ZWIN.find(w=>w[0]===ZSEL)[1].toLowerCase())}</span><b>${(window.__zips.totals||{})[ZSEL] ?? 0}</b></div>
+    <div class="ztile"><span>ZIPs with leads</span><b>${live.length}</b></div>
+    <div class="ztile"><span>Busiest ZIP</span><b>${top ? top.zip : "—"}</b><em>${top ? (top.city?esc(top.city)+" · ":"")+top.counts[ZSEL]+" leads" : "nothing in this window"}</em></div>
+    <div class="ztile"><span>ZIPs ever</span><b>${window.__zips.zip_count}</b></div>`;
+}
+function drawZTable() {
+  const rows = [...(window.__zips.zips || [])];
+  rows.sort((a, b) =>
+    ZSORT === "zip" ? a.zip.localeCompare(b.zip)
+    : ZSORT === "recent" ? String(b.last_at||"").localeCompare(String(a.last_at||""))
+    : (b.counts[ZSEL] - a.counts[ZSEL]) || (b.counts.all - a.counts.all));
+  const el = document.getElementById("ztable");
+  if (!rows.length) { el.innerHTML = `<div class="empty">No ZIPs stamped yet — the ZIP stamper runs every 15 minutes.</div>`; return; }
+  el.innerHTML = `<div class="meta" style="margin-bottom:6px">Sort:
+      <a href="#" onclick="setZSort('count');return false">busiest</a> ·
+      <a href="#" onclick="setZSort('zip');return false">ZIP</a> ·
+      <a href="#" onclick="setZSort('recent');return false">most recent</a>
+      — the highlighted column follows the filter above.</div>
+    <div style="overflow-x:auto"><table><thead><tr>
+      <th>ZIP</th><th>City</th><th>County</th>
+      ${ZWIN.map(([k,l]) => `<th class="money ${k===ZSEL?"zon":""}">${l.replace("Last ","").replace(" days","d")}</th>`).join("")}
+      <th class="money">Avg price</th><th>Last lead</th></tr></thead><tbody>
+      ${rows.map(z => `<tr>
+        <td><b>${z.zip}</b></td><td>${esc(z.city||"—")}</td><td>${esc(z.county||"—")}</td>
+        ${ZWIN.map(([k]) => `<td class="money ${k===ZSEL?"zon":""}">${z.counts[k] || "·"}</td>`).join("")}
+        <td class="money">${z.avg_price ? "$"+Number(z.avg_price).toLocaleString() : "—"}</td>
+        <td class="meta">${z.last_at ? et(z.last_at) : "—"}</td></tr>`).join("")}
+      </tbody><tfoot><tr>
+        <td colspan="3"><b>All ZIPs</b></td>
+        ${ZWIN.map(([k]) => `<td class="money ${k===ZSEL?"zon":""}"><b>${rows.reduce((s,z)=>s+(z.counts[k]||0),0)}</b></td>`).join("")}
+        <td colspan="2" class="meta">${window.__zips.unzipped ? window.__zips.unzipped+" lead(s) without a location" : ""}</td>
+      </tr></tfoot></table></div>`;
+}
+
 function viewMap() {
   V().innerHTML = `<h1>Coverage Map</h1><div class="sub">Leads (blue) + partners (teal) with coverage circles.</div>
     <div class="card" style="height:calc(100vh - 230px);min-height:420px"><iframe src="map.html#${MAP_VIEW_TOKEN}" style="width:100%;height:100%;border:0"></iframe></div>`;
