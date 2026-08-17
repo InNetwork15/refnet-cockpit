@@ -238,11 +238,12 @@ async function viewMessages() {
 async function refreshConvs(silent) {
   const d = await api("?section=conversations");
   const el = document.getElementById("convlist"); if (!el) return;
-  el.innerHTML = (d.conversations||[]).map(c => `<div class="convrow ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick='openConv(${JSON.stringify(JSON.stringify(c))})'>
+  window.__convs = d.conversations || [];
+  el.innerHTML = window.__convs.map((c, i) => `<div class="convrow ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
     <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> <span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting":"client"}</span>
     <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("") || `<div class="empty" style="padding:14px">No conversations yet.</div>`;
 }
-window.openConv = (json) => { SELCONV = JSON.parse(json); THREADSIG = ""; refreshConvs(true); loadThread(SELCONV); };
+window.openConvIdx = (i) => { const c = (window.__convs||[])[i]; if (!c) return; SELCONV = c; THREADSIG = ""; refreshConvs(true); loadThread(c); };
 async function loadThread(c, silent) {
   const d = await api("?section=thread&phone=" + encodeURIComponent(c.key));
   const sig = (d.messages||[]).length + ":" + (d.messages?.[0]?.id||"") + ":" + (d.draft?.comm_id||"");
