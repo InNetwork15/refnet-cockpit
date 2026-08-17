@@ -70,6 +70,21 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
 .bub.out{background:var(--blue);color:#fff;align-self:flex-end}
 .bub .meta{display:block;margin-top:3px;font-size:10.5px;color:inherit;opacity:.7}
 .draftbar{background:#e9f9f2;border-top:1px solid #d4f0e2;padding:10px 14px;font-size:13px}
+/* reply state — has this message been answered? */
+.convrow.needs{background:#fffaf3;box-shadow:inset 3px 0 0 var(--amber)}
+.convrow.needs:hover{background:#fff5e8}
+.convrow.needs.sel{background:#fdf0dd}
+.st{display:inline-block;font-size:11px;font-weight:700;padding:2px 9px;border-radius:20px;margin-right:6px}
+.st-needs{background:#fdf1dc;color:#8a5a00}
+.st-answered{background:#e6f5ef;color:var(--green)}
+.st-waiting{background:#eef1f6;color:#52617a}
+.mfilter{display:flex;gap:6px;padding:9px 10px;border-bottom:1px solid #eef0f4;position:sticky;top:0;background:#fff;z-index:5}
+.mfilter button{font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:20px;border:1px solid #dbe1ea;background:#fff;color:#52617a;cursor:pointer;font-family:inherit}
+.mfilter button.on{background:var(--blue);border-color:var(--blue);color:#fff}
+.statebar{padding:8px 14px;font-size:12.5px;font-weight:600;border-bottom:1px solid #eef0f4}
+.statebar.needs{background:#fdf1dc;color:#8a5a00}
+.statebar.answered{background:#e9f9f2;color:var(--green)}
+.statebar.waiting{background:#f5f7fa;color:#52617a}
 .comp{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #eef0f4}
 .comp textarea{resize:none;height:60px}
 </style>
@@ -235,24 +250,46 @@ async function viewMessages() {
     if (SELCONV) loadThread(SELCONV, true);
   }, 8000);
 }
+/* v13: has this conversation been responded to? needs_reply = they spoke last and nobody
+   answered; answered = we came back (AI or a human tap); no_reply_yet = we texted, silence. */
+function waitFor(m) { if (m == null) return ""; if (m < 60) return m + "m"; if (m < 1440) return Math.floor(m/60) + "h"; return Math.floor(m/1440) + "d"; }
+function stateChip(c) {
+  if (c.reply_state === "needs_reply") return `<span class="st st-needs">● Needs reply${c.wait_min!=null?" · "+waitFor(c.wait_min):""}</span>${c.draft_ready?`<span class="st st-answered">🤖 draft ready</span>`:""}`;
+  if (c.reply_state === "answered") return `<span class="st st-answered">✓ Replied${c.answered_by==="ai"?" (AI)":c.answered_by==="human"?" (you)":""}</span>`;
+  return `<span class="st st-waiting">↻ Waiting on them</span>`;
+}
+window.__mNeedsOnly = false;
+window.setMFilter = (v) => { window.__mNeedsOnly = v; refreshConvs(true); };
 async function refreshConvs(silent) {
   const d = await api("?section=conversations");
   const el = document.getElementById("convlist"); if (!el) return;
   window.__convs = d.conversations || [];
-  el.innerHTML = window.__convs.map((c, i) => `<div class="convrow ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
+  const need = window.__convs.filter(c => c.reply_state === "needs_reply").length;
+  const rows = window.__convs.map((c, i) => ({ c, i })).filter(x => !window.__mNeedsOnly || x.c.reply_state === "needs_reply");
+  el.innerHTML = `<div class="mfilter">
+      <button class="${window.__mNeedsOnly?"":"on"}" onclick="setMFilter(false)">All (${window.__convs.length})</button>
+      <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(true)">Needs reply (${need})</button></div>`
+    + (rows.map(({c, i}) => `<div class="convrow ${c.reply_state==="needs_reply"?"needs":""} ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
     <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting":"client"}</span>
-    <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("") || `<div class="empty" style="padding:14px">No conversations yet.</div>`;
+    <div style="margin:3px 0 1px">${stateChip(c)}</div>
+    <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("")
+    || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply — all caught up. 🎉":"No conversations yet."}</div>`);
 }
 window.openConvIdx = (i) => { const c = (window.__convs||[])[i]; if (!c) return; SELCONV = c; THREADSIG = ""; refreshConvs(true); loadThread(c); };
 async function loadThread(c, silent) {
   const d = await api("?section=thread&phone=" + encodeURIComponent(c.key));
-  const sig = (d.messages||[]).length + ":" + (d.messages?.[0]?.id||"") + ":" + (d.draft?.comm_id||"");
+  const sig = (d.messages||[]).length + ":" + (d.messages?.[0]?.id||"") + ":" + (d.draft?.comm_id||"") + ":" + d.reply_state + ":" + waitFor(d.wait_min);
   if (silent && sig === THREADSIG) return;
   THREADSIG = sig;
   const th = document.getElementById("thread"); if (!th) return;
   th.innerHTML = `<div class="thhead"><span class="whoName">${c.is_group?"👥 ":""}${esc(c.name || fmtPh(c.key))}</span>
       <span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting lane — TJ's line":"client lane — Tony's line"}</span>
       <span class="meta">${c.is_group?"group text — everyone sees every message · "+(c.members||c.key.split(",")).map(fmtPh).join(" · "):fmtPh(c.key)}</span></div>
+    ${d.reply_state==="needs_reply"
+      ? `<div class="statebar needs">● Not responded to yet — they've been waiting ${waitFor(d.wait_min)}.</div>`
+      : d.reply_state==="answered"
+      ? `<div class="statebar answered">✓ Responded ${et(d.answered_at)}${d.answered_by==="ai"?" — sent by the AI":d.answered_by==="human"?" — sent by you":""}.</div>`
+      : `<div class="statebar waiting">↻ We reached out — no reply from them yet.</div>`}
     <div id="msgs">${(d.messages||[]).slice().reverse().map(m => `<div class="bub ${m.direction==="out"?"out":""}">${esc(m.body)}<span class="meta">${et(m.occurred_at)}${m.ai_extraction?.send_status&&m.ai_extraction.send_status!=="sent"?" · "+esc(m.ai_extraction.send_status):""}</span></div>`).join("")}</div>
     ${d.draft ? `<div class="draftbar">🤖 <b>AI draft ready:</b> “${esc(d.draft.text)}” <button class="btn ghost" style="margin-left:8px" onclick="useDraft()">Use draft</button></div>` : ""}
     <div class="comp"><textarea id="cbody" placeholder="Type a message…"></textarea><button id="csend">Send</button></div>`;
@@ -264,7 +301,7 @@ async function loadThread(c, silent) {
     document.getElementById("csend").disabled = true;
     const r = await api("", { method:"POST", body: JSON.stringify({ action:"send_message", to_phone:c.key, text, lane:c.lane, draft_comm_id: usingDraft ? window.__draft.comm_id : null }) });
     if (r.status && r.status !== "sent") alert("Not sent: " + r.status + (r.status==="blocked_allowlist"?" (allowlist is still on — go-live gate)":""));
-    THREADSIG = ""; loadThread(c);
+    THREADSIG = ""; loadThread(c); refreshConvs(true);
   };
 }
 window.useDraft = () => { if (window.__draft) { document.getElementById("cbody").value = window.__draft.text; } };
