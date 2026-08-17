@@ -434,7 +434,7 @@ window.renderEmailSetup = (st) => {
         <input id="gcsec" placeholder="Google client secret" type="password" style="margin-bottom:8px">
         <button class="btn ghost" onclick="saveGoogleCreds()">Save credentials</button>
       </div>
-      <div class="row">
+      <div class="row" id="gconnect">
         <button onclick="connectGmail()">${st.connected?"Reconnect":"Connect"} Gmail</button>
         ${st.connected?`<button class="btn ghost" style="margin-left:8px" onclick="disconnectGmail()">Disconnect</button>`:""}
         ${st.connected?`<a class="btn ghost" style="margin-left:8px" href="#/email" onclick="setTimeout(()=>location.reload(),50)">Back to inbox</a>`:""}
@@ -457,8 +457,17 @@ window.connectGmail = async () => {
   const hint = prompt("Which mailbox should RefNet connect?\n\nType the full address (e.g. tony@innetworkrealestate.com).\nLeave blank to pick from Google's account list.", "") ?? "";
   const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"connect_url", login_hint: hint.trim() }) });
   if (r.error || !r.url) { alert(r.error || "Could not start the Google connection."); return; }
-  window.open(r.url, "_blank");
-  alert("A Google tab opened — pick the account you want RefNet to use and approve access, then come back and refresh this page.");
+  // A window.open() after an await is no longer "user-initiated", so popup blockers eat it
+  // silently. Render a real link instead — clicking that IS a gesture and always opens.
+  const slot = document.getElementById("gconnect");
+  if (slot) {
+    slot.innerHTML = `<a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener"
+        style="display:inline-block;text-decoration:none;padding:11px 18px">→ Continue to Google (opens the account picker)</a>
+      <div class="meta" style="margin-top:6px">Pick the mailbox, approve read + send, then come back here and refresh.
+      This link is single-use and good for 15 minutes.</div>`;
+    slot.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+  try { window.open(r.url, "_blank"); } catch (e) { /* blocked — the link above is the path */ }
 };
 window.disconnectGmail = async () => {
   if (!confirm("Disconnect this mailbox? Email already pulled in stays in the app; nothing changes in Gmail.")) return;
