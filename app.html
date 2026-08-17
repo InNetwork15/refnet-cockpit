@@ -144,6 +144,7 @@ const MODULES = [
   { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
   { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
+  { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
   { id:"profile",   nav:"My Profile",match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
@@ -315,6 +316,145 @@ window.newGroupText = async () => {
   const r = await api("", { method:"POST", body: JSON.stringify({ action:"send_message", to_phone:key, text, lane }) });
   alert(r.status === "sent" ? "Group text sent — the thread will appear in the list within a minute." : "Not sent: " + (r.status||r.error||"unknown"));
   refreshConvs(true);
+};
+
+/* ---------- EMAIL (Gmail desk — INRE's email world, RefNet-shaped) ----------
+   Same two-pane shape as Messages: threads on the left with a responded/not badge,
+   the conversation on the right, reply box at the bottom. Sends go out from the
+   connected mailbox and thread onto the original email. */
+let SELMAIL = null, MAILSIG = "";
+const eapi = (qs, opts) => api("?fn=email" + qs, opts);
+async function viewEmail() {
+  V().innerHTML = `<h1>Email <button class="btn ghost" style="float:right" onclick="composeEmail()">✉️ New email</button></h1>
+    <div class="sub" id="emailsub">Loading mailbox…</div>
+    <div id="emailbody"></div>`;
+  const st = await eapi("&section=email_status");
+  window.__mail = st;
+  const sub = document.getElementById("emailsub");
+  if (!st.connected) { renderEmailSetup(st); return; }
+  sub.innerHTML = `Connected to <b>${esc(st.address||"the mailbox")}</b> — read and reply right here; replies thread onto the original in Gmail.
+    ${st.last_sync?`Last pulled ${et(st.last_sync)}.`:"Waiting for the first pull."}
+    <a href="#" onclick="renderEmailSetup(window.__mail);return false" style="color:var(--muted)">Settings</a>`;
+  document.getElementById("emailbody").innerHTML = `<div class="msgshell"><div class="convlist" id="maillist">Loading…</div>
+    <div class="thread" id="mailthread"><div class="empty" style="padding:20px">Pick an email.</div></div></div>`;
+  await refreshMail();
+  window.__mailPoll = setInterval(async () => {
+    if (!location.hash.startsWith("#/email")) { clearInterval(window.__mailPoll); window.__mailPoll = null; return; }
+    await refreshMail(true);
+    if (SELMAIL) loadMailThread(SELMAIL, true);
+  }, 20000);
+}
+window.__mailNeedsOnly = false;
+window.setMailFilter = (v) => { window.__mailNeedsOnly = v; refreshMail(true); };
+async function refreshMail(silent) {
+  const d = await eapi("&section=email_threads");
+  const el = document.getElementById("maillist"); if (!el) return;
+  window.__threads = d.threads || [];
+  const need = window.__threads.filter(t => t.reply_state === "needs_reply").length;
+  const rows = window.__threads.map((t, i) => ({ t, i })).filter(x => !window.__mailNeedsOnly || x.t.reply_state === "needs_reply");
+  el.innerHTML = `<div class="mfilter">
+      <button class="${window.__mailNeedsOnly?"":"on"}" onclick="setMailFilter(false)">All (${window.__threads.length})</button>
+      <button class="${window.__mailNeedsOnly?"on":""}" onclick="setMailFilter(true)">Needs reply (${need})</button></div>`
+    + (rows.map(({t, i}) => `<div class="convrow ${t.reply_state==="needs_reply"?"needs":""} ${SELMAIL&&SELMAIL.key===t.key?"sel":""}" onclick="openMailIdx(${i})">
+      <span class="whoName">${esc(t.name || "(unknown sender)")}</span>
+      ${t.who_kind!=="other"?`<span class="kind ${t.who_kind==="partner"?"lane-agent":"lane-client"}">${t.who_kind==="partner"?"agent":"client"}</span>`:""}
+      ${t.has_attachments?`<span class="kind">📎</span>`:""}
+      <div style="margin:3px 0 1px">${stateChip(t)}</div>
+      <div class="meta" style="font-weight:600;color:#41506a">${esc(t.subject)}</div>
+      <div class="meta">${t.last_dir==="out"?"➡ ":"⬅ "}${esc(t.last_body)}</div><div class="meta">${et(t.last_at)}</div></div>`).join("")
+    || `<div class="empty" style="padding:14px">${window.__mailNeedsOnly?"Every email has been answered. 🎉":"No email yet — the mailbox pulls in every 5 minutes."}</div>`);
+}
+window.openMailIdx = (i) => { const t = (window.__threads||[])[i]; if (!t) return; SELMAIL = t; MAILSIG = ""; refreshMail(true); loadMailThread(t); };
+async function loadMailThread(t, silent) {
+  const d = await eapi("&section=email_thread&thread=" + encodeURIComponent(t.key));
+  const sig = (d.messages||[]).length + ":" + (d.messages?.[0]?.id||"") + ":" + d.reply_state + ":" + waitFor(d.wait_min);
+  if (silent && sig === MAILSIG) return;
+  MAILSIG = sig;
+  const th = document.getElementById("mailthread"); if (!th) return;
+  const newest = (d.messages||[])[0];
+  const newestIn = (d.messages||[]).find(m => m.direction === "in");
+  th.innerHTML = `<div class="thhead"><span class="whoName">${esc(t.name||"")}</span>
+      <span class="meta">${esc(t.email||"")} · ${t.messages} message${t.messages===1?"":"s"}</span></div>
+    ${d.reply_state==="needs_reply"
+      ? `<div class="statebar needs">● Not responded to yet — waiting ${waitFor(d.wait_min)}.</div>`
+      : d.reply_state==="answered"
+      ? `<div class="statebar answered">✓ Responded ${et(d.answered_at)}${d.answered_by==="ai"?" — sent automatically":" — sent by you"}.</div>`
+      : `<div class="statebar waiting">↻ We wrote first — no reply from them yet.</div>`}
+    <div id="msgs">${(d.messages||[]).slice().reverse().map(m => `<div class="bub ${m.direction==="out"?"out":""}" style="max-width:86%">
+        <div style="font-weight:700;font-size:12px;margin-bottom:3px">${esc(m.subject||"(no subject)")}</div>
+        ${esc((m.body_text || m.snippet || "").slice(0, 4000))}
+        ${m.has_attachments?`<div style="font-size:11px;margin-top:4px">📎 ${(m.attachments||[]).map(a=>esc(a.filename)).join(", ")}</div>`:""}
+        <span class="meta">${m.direction==="out"?"sent":esc(m.from_email||"")} · ${et(m.occurred_at)}</span></div>`).join("")}</div>
+    <div class="comp" style="flex-direction:column;gap:6px">
+      <textarea id="ebody" placeholder="Write your reply… (sends from ${esc((window.__mail&&window.__mail.address)||"the connected mailbox")} and threads onto this email)"></textarea>
+      <div style="display:flex;gap:8px;align-items:center"><button id="esend">Send reply</button>
+      <span class="meta">Replying to ${esc((newestIn&&newestIn.from_email)||t.email||"")}</span></div>
+    </div>`;
+  const msgs = document.getElementById("msgs"); msgs.scrollTop = msgs.scrollHeight;
+  document.getElementById("esend").onclick = async () => {
+    const text = document.getElementById("ebody").value.trim(); if (!text) return;
+    const btn = document.getElementById("esend"); btn.disabled = true; btn.textContent = "Sending…";
+    const subj = /^re:/i.test(newest?.subject||"") ? newest.subject : "Re: " + (newest?.subject || "(no subject)");
+    const r = await eapi("", { method:"POST", body: JSON.stringify({
+      action:"send_email", to: (newestIn&&newestIn.from_email) || t.email, subject: subj, body: text,
+      thread_id: t.key, reply_to_email_id: (newestIn||newest||{}).id }) });
+    if (r.error) { alert("Not sent: " + r.error + (r.detail?" — "+r.detail:"")); btn.disabled = false; btn.textContent = "Send reply"; return; }
+    MAILSIG = ""; loadMailThread(t); refreshMail(true);
+  };
+}
+window.composeEmail = async () => {
+  if (!window.__mail || !window.__mail.connected) { alert("Connect Gmail first."); return; }
+  const to = prompt("Send to (email address):"); if (!to) return;
+  const subject = prompt("Subject:"); if (subject === null) return;
+  const bodyText = prompt("Message:"); if (!bodyText) return;
+  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"send_email", to, subject, body: bodyText }) });
+  alert(r.error ? ("Not sent: " + r.error + (r.detail?" — "+r.detail:"")) : "Sent ✓");
+  refreshMail(true);
+};
+/* Setup card — Google credentials + the one-click connect handshake. */
+window.renderEmailSetup = (st) => {
+  const sub = document.getElementById("emailsub");
+  if (sub) sub.textContent = st.connected
+    ? "Mailbox settings — RefNet reads and replies from this Google account."
+    : "Connect a Google mailbox and email lands here like the texts do.";
+  document.getElementById("emailbody").innerHTML = `
+    <div class="card"><h2>📬 Gmail connection</h2><div class="body">
+      <div class="row"><b>Status:</b> ${st.connected?`<span class="ok">Connected</span> — ${esc(st.address||"mailbox")}${st.connected_at?` since ${et(st.connected_at)}`:""}`:`<span class="bad">Not connected</span>`}</div>
+      <div class="row"><b>Google app credentials:</b> ${st.has_credentials?`<span class="ok">saved</span>`:`<span class="bad">missing</span>`}</div>
+      <div class="row"><b>Redirect URI</b> (paste this into the Google Cloud OAuth client):<br>
+        <code style="font-size:12px;word-break:break-all">${esc(st.redirect_uri)}</code></div>
+      <div class="row">
+        <input id="gcid" placeholder="Google client ID (…apps.googleusercontent.com)" style="margin-bottom:6px">
+        <input id="gcsec" placeholder="Google client secret" type="password" style="margin-bottom:8px">
+        <button class="btn ghost" onclick="saveGoogleCreds()">Save credentials</button>
+      </div>
+      <div class="row">
+        <button onclick="connectGmail()">${st.connected?"Reconnect":"Connect"} Gmail</button>
+        ${st.connected?`<button class="btn ghost" style="margin-left:8px" onclick="disconnectGmail()">Disconnect</button>`:""}
+        ${st.connected?`<a class="btn ghost" style="margin-left:8px" href="#/email" onclick="setTimeout(()=>location.reload(),50)">Back to inbox</a>`:""}
+      </div>
+      <div class="row meta">Scopes requested: read + send on that one mailbox. Nothing is ever deleted from Gmail,
+        and no email is sent automatically — every send is a person clicking Send in this app.</div>
+    </div></div>`;
+};
+window.saveGoogleCreds = async () => {
+  const client_id = document.getElementById("gcid").value.trim();
+  const client_secret = document.getElementById("gcsec").value.trim();
+  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"save_credentials", client_id, client_secret }) });
+  if (r.error) { alert(r.error); return; }
+  alert("Saved ✓ — now click Connect Gmail.");
+  viewEmail();
+};
+window.connectGmail = async () => {
+  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"connect_url" }) });
+  if (r.error || !r.url) { alert(r.error || "Could not start the Google connection."); return; }
+  window.open(r.url, "_blank");
+  alert("A Google sign-in tab opened. Approve access there, then come back and refresh this page.");
+};
+window.disconnectGmail = async () => {
+  if (!confirm("Disconnect this mailbox? Email already pulled in stays in the app; nothing changes in Gmail.")) return;
+  await eapi("", { method:"POST", body: JSON.stringify({ action:"disconnect" }) });
+  viewEmail();
 };
 
 /* ---------- LIVE FEED (go-live watch) ---------- */
