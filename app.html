@@ -452,10 +452,13 @@ window.saveGoogleCreds = async () => {
   viewEmail();
 };
 window.connectGmail = async () => {
-  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"connect_url" }) });
+  // Josh is signed into several Google accounts — ask which mailbox, then make Google show the
+  // account chooser (and pre-select the one he named) so it can't grab the wrong login.
+  const hint = prompt("Which mailbox should RefNet connect?\n\nType the full address (e.g. tony@innetworkrealestate.com).\nLeave blank to pick from Google's account list.", "") ?? "";
+  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"connect_url", login_hint: hint.trim() }) });
   if (r.error || !r.url) { alert(r.error || "Could not start the Google connection."); return; }
   window.open(r.url, "_blank");
-  alert("A Google sign-in tab opened. Approve access there, then come back and refresh this page.");
+  alert("A Google tab opened — pick the account you want RefNet to use and approve access, then come back and refresh this page.");
 };
 window.disconnectGmail = async () => {
   if (!confirm("Disconnect this mailbox? Email already pulled in stays in the app; nothing changes in Gmail.")) return;
