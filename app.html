@@ -98,6 +98,9 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
 .ztile em{font-style:normal;font-size:12px;color:var(--muted)}
 td.zon,th.zon{background:#eef4ff}
 th.zon{color:var(--blue)}
+th.zsort{cursor:pointer;user-select:none;white-space:nowrap}
+th.zsort:hover{background:#e7edf9;color:var(--brand)}
+th.zactive{color:var(--brand)}
 .comp{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #eef0f4}
 .comp textarea{resize:none;height:60px}
 </style>
@@ -570,7 +573,9 @@ window.startOutreach = async (json) => {
    window (7/10/30/90/365/all), so the filter chips re-draw the map and re-sort the table
    instantly — no reload, no second round trip. Hover a bubble to see that ZIP's count. */
 const ZWIN = [["7d","Last 7 days"],["10d","Last 10 days"],["30d","Last 30 days"],["90d","Last 90 days"],["365d","Last year"],["all","All time"]];
-let ZSEL = "30d", ZMAP = null, ZLAYER = null, ZSORT = "count";
+let ZSEL = "30d", ZMAP = null, ZLAYER = null;
+// sort follows the window filter until you click a heading yourself — then it stays put
+let ZSORT = { key: "w:30d", dir: -1, pinned: false };
 const zapi = (qs) => api("?fn=zips" + qs);
 function loadLeaflet() {
   if (window.L) return Promise.resolve();
@@ -604,8 +609,11 @@ function drawZChips() {
     `<button class="${ZSEL===k?"on":""}" onclick="setZWin('${k}')">${label}
       <b>${(window.__zips.totals||{})[k] ?? 0}</b></button>`).join("");
 }
-window.setZWin = async (k) => { ZSEL = k; drawZChips(); await drawZMap(); drawZTable(); };
-window.setZSort = (s) => { ZSORT = s; drawZTable(); };
+window.setZWin = async (k) => {
+  ZSEL = k;
+  if (!ZSORT.pinned) ZSORT = { key: "w:" + k, dir: -1, pinned: false };
+  drawZChips(); await drawZMap(); drawZTable();
+};
 async function drawZMap() {
   const rows = (window.__zips.zips || []).filter(z => z.lat != null && z.lng != null);
   try { await loadLeaflet(); } catch (e) {
@@ -644,23 +652,48 @@ async function drawZMap() {
     <div class="ztile"><span>Busiest ZIP</span><b>${top ? top.zip : "—"}</b><em>${top ? (top.city?esc(top.city)+" · ":"")+top.counts[ZSEL]+" leads" : "nothing in this window"}</em></div>
     <div class="ztile"><span>ZIPs ever</span><b>${window.__zips.zip_count}</b></div>`;
 }
+/* Every column header sorts. Click once for the sensible direction (biggest first for
+   numbers, A–Z for names), click again to flip. Text columns put blanks last either way, so
+   "—" never crowds out the real rows. */
+function zVal(z, key) {
+  if (key === "zip") return z.zip;
+  if (key === "city") return (z.city || "").toLowerCase();
+  if (key === "county") return (z.county || "").toLowerCase();
+  if (key === "avg") return z.avg_price == null ? null : Number(z.avg_price);
+  if (key === "last") return z.last_at || "";
+  if (key.startsWith("w:")) return z.counts[key.slice(2)] || 0;
+  return 0;
+}
+const zIsText = (k) => k === "zip" || k === "city" || k === "county" || k === "last";
+window.sortZBy = (key) => {
+  if (ZSORT.key === key) ZSORT.dir = -ZSORT.dir;
+  else ZSORT = { key, dir: zIsText(key) && key !== "last" ? 1 : -1, pinned: true };
+  ZSORT.pinned = true;
+  drawZTable();
+};
+function zCaret(key) {
+  if (ZSORT.key !== key) return `<span style="opacity:.25">↕</span>`;
+  return `<span style="color:var(--blue)">${ZSORT.dir === 1 ? "↑" : "↓"}</span>`;
+}
 function drawZTable() {
   const rows = [...(window.__zips.zips || [])];
-  rows.sort((a, b) =>
-    ZSORT === "zip" ? a.zip.localeCompare(b.zip)
-    : ZSORT === "recent" ? String(b.last_at||"").localeCompare(String(a.last_at||""))
-    : (b.counts[ZSEL] - a.counts[ZSEL]) || (b.counts.all - a.counts.all));
+  const { key, dir } = ZSORT;
+  rows.sort((a, b) => {
+    const x = zVal(a, key), y = zVal(b, key);
+    if (x === y) return b.counts.all - a.counts.all;          // steady tiebreak
+    const blankX = x === null || x === "", blankY = y === null || y === "";
+    if (blankX || blankY) return blankX ? 1 : -1;             // blanks always sink
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir;
+  });
   const el = document.getElementById("ztable");
   if (!rows.length) { el.innerHTML = `<div class="empty">No ZIPs stamped yet — the ZIP stamper runs every 15 minutes.</div>`; return; }
-  el.innerHTML = `<div class="meta" style="margin-bottom:6px">Sort:
-      <a href="#" onclick="setZSort('count');return false">busiest</a> ·
-      <a href="#" onclick="setZSort('zip');return false">ZIP</a> ·
-      <a href="#" onclick="setZSort('recent');return false">most recent</a>
-      — the highlighted column follows the filter above.</div>
+  const th = (key, label, cls) =>
+    `<th class="zsort ${cls||""} ${ZSORT.key===key?"zactive":""}" onclick="sortZBy('${key}')" title="Sort by ${label}">${label} ${zCaret(key)}</th>`;
+  el.innerHTML = `<div class="meta" style="margin-bottom:6px">Click any column heading to sort — click it again to reverse. The shaded column follows the filter above.</div>
     <div style="overflow-x:auto"><table><thead><tr>
-      <th>ZIP</th><th>City</th><th>County</th>
-      ${ZWIN.map(([k,l]) => `<th class="money ${k===ZSEL?"zon":""}">${l.replace("Last ","").replace(" days","d")}</th>`).join("")}
-      <th class="money">Avg price</th><th>Last lead</th></tr></thead><tbody>
+      ${th("zip","ZIP")}${th("city","City")}${th("county","County")}
+      ${ZWIN.map(([k,l]) => th("w:"+k, l.replace("Last ","").replace(" days","d"), "money " + (k===ZSEL?"zon":""))).join("")}
+      ${th("avg","Avg price","money")}${th("last","Last lead")}</tr></thead><tbody>
       ${rows.map(z => `<tr>
         <td><b>${z.zip}</b></td><td>${esc(z.city||"—")}</td><td>${esc(z.county||"—")}</td>
         ${ZWIN.map(([k]) => `<td class="money ${k===ZSEL?"zon":""}">${z.counts[k] || "·"}</td>`).join("")}
