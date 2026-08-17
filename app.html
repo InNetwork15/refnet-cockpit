@@ -421,8 +421,14 @@ window.renderEmailSetup = (st) => {
     <div class="card"><h2>📬 Gmail connection</h2><div class="body">
       <div class="row"><b>Status:</b> ${st.connected?`<span class="ok">Connected</span> — ${esc(st.address||"mailbox")}${st.connected_at?` since ${et(st.connected_at)}`:""}`:`<span class="bad">Not connected</span>`}</div>
       <div class="row"><b>Google app credentials:</b> ${st.has_credentials?`<span class="ok">saved</span>`:`<span class="bad">missing</span>`}</div>
-      <div class="row"><b>Redirect URI</b> (paste this into the Google Cloud OAuth client):<br>
-        <code style="font-size:12px;word-break:break-all">${esc(st.redirect_uri)}</code></div>
+      <div class="row"><b>Reuse INRE's Google app</b> — no new project, no new consent screen. Two steps:
+        <div style="margin:6px 0 0">1. In Google Cloud Console → the INRE project → APIs &amp; Services → Credentials →
+        the existing Gmail OAuth client → <b>Authorized redirect URIs → Add</b>:<br>
+        <code style="font-size:12px;word-break:break-all">${esc(st.redirect_uri)}</code> → Save.</div>
+        <div style="margin:6px 0 0">2. Copy that same client's ID + secret into the boxes below → Save → Connect.</div>
+        <div class="meta" style="margin-top:6px">We ask only for the two scopes that app already has approved
+        (read + send), so nothing else on Google's side has to change. Sign in as the
+        @innetworkrealestate.com mailbox you want RefNet to work out of.</div></div>
       <div class="row">
         <input id="gcid" placeholder="Google client ID (…apps.googleusercontent.com)" style="margin-bottom:6px">
         <input id="gcsec" placeholder="Google client secret" type="password" style="margin-bottom:8px">
