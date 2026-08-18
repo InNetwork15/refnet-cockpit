@@ -157,8 +157,7 @@ function renderLogin(err, notice) {
 
 /* ---------- SHELL + ROUTER (INRE MODULES pattern) ---------- */
 const MODULES = [
-  { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
-  { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
+  { id:"home",      nav:"Home",      match: h => h.startsWith("#/home") || h === "#/" || h === "#" || h === "", render: () => viewHome() },
   { id:"board",     nav:"Board",     match: h => h.startsWith("#/board"),     render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
@@ -167,15 +166,17 @@ const MODULES = [
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
   { id:"zips",      nav:"Leads by ZIP", match: h => h.startsWith("#/zips"),   render: () => viewZips() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
-  { id:"profile",   nav:"My Profile",match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
+  // My Profile is reachable from the avatar menu; it does not need a tab of its own too.
+  { id:"profile",   nav:null,        match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
 ];
 function renderShell() {
-  const h = location.hash || "#/dashboard";
+  const h = location.hash || "#/home";
   const initials = (ME.full_name||ME.email||"??").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
   // INRE's shell: nav-first (no brand block), avatar with dropdown (My Profile / Sign out)
   A().innerHTML = `<div class="top">
-    <div class="nav">${MODULES.map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
+    <div class="nav">${MODULES.filter(m=>m.nav).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
+    <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
     ${ME.role==="admin" ? `<button id="bigpause" style="margin-right:12px;border-radius:999px;font-weight:800;background:#d23b34;box-shadow:0 1px 2px rgba(210,59,52,.35)">⏸ PAUSE ALL</button>` : ""}
     <span id="modebadge" class="kind" style="margin-right:10px">…</span>
     <div style="position:relative">
@@ -191,6 +192,7 @@ function renderShell() {
   document.getElementById("whoava").onclick = () => { const d = document.getElementById("whodd"); d.style.display = d.style.display === "block" ? "none" : "block"; };
   document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
   refreshModeBadge();
+  pollBots(); if (!window.__botPoll) window.__botPoll = setInterval(pollBots, 45000);
   const bp = document.getElementById("bigpause");
   if (bp) bp.onclick = async () => {
     const badge = document.getElementById("modebadge").textContent;
@@ -213,50 +215,146 @@ async function refreshModeBadge() {
     else { el.textContent = "⏸ PAUSED"; el.style.background = "#fdf1dc"; el.style.color = "#b8770a"; if (bp) bp.textContent = "▶ RESUME LIVE"; }
   } catch { /* badge is best-effort */ }
 }
+/* ---------- BOT STATUS PILLS + AI (Josh 2026-08-18, the INRE header pattern) ----------
+   Twenty agents run this business and the app never said whether any of them were alive.
+   The colour here answers what came BACK, not what was SENT: pg_cron reports "succeeded" the
+   instant it queues a request, which is how the call transcriber sat broken for its whole life
+   answering 400 every ten minutes under a green light. Click any pill for the detail. */
+const PILLC = { ok:"#127a3e", warn:"#8a6d00", bad:"#b3261e" };
+async function pollBots() {
+  const el = document.getElementById("botpills"); if (!el) return;
+  try {
+    const d = await api("?fn=bots");
+    window.__bots = d;
+    el.innerHTML = (d.pills || []).map(function (p) {
+      const c = PILLC[p.state] || "#5f6e8a";
+      return '<span class="botpill" data-k="' + p.key + '" title="' + esc(p.tip) + '"'
+        + ' style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:' + c
+        + ';background:' + c + '14;border:1px solid ' + c + '44;border-radius:999px;padding:4px 10px;'
+        + 'white-space:nowrap;cursor:pointer;margin-right:6px">'
+        + '<span style="width:7px;height:7px;border-radius:50%;background:' + c + ';flex:none"></span>'
+        + p.emoji + " " + esc(p.label) + " · " + esc(p.value) + "</span>";
+    }).join("");
+    el.querySelectorAll(".botpill").forEach(function (n) { n.onclick = function () { openBots(n.dataset.k); }; });
+  } catch (e) { /* the header never breaks the app */ }
+}
+window.openBots = function (which) {
+  const d = window.__bots; if (!d) return;
+  let body = "";
+  if (which === "agents") {
+    const S = { ok:["#127a3e","on schedule"], late:["#8a6d00","late"], off:["#5f6e8a","switched off"] };
+    body = '<div style="background:#fff8e6;border:1px solid #f0dfae;border-radius:10px;padding:9px 12px;font-size:12.5px;margin-bottom:10px">'
+      + "<b>What green means here.</b> " + esc(d.pulse.caveat) + " In the last 24 hours: <b>"
+      + d.pulse.ok_24h + "</b> clean answers, <b>" + d.pulse.err_24h + "</b> errors, <b>"
+      + d.pulse.timeout_24h + "</b> timeouts."
+      + (d.pulse.last_err_body ? "<div style=\"margin-top:5px\">Most recent error said: <i>" + esc(String(d.pulse.last_err_body).slice(0,160)) + "</i></div>" : "")
+      + "</div>";
+    body += (d.agents || []).map(function (a) {
+      const st = S[a.state] || ["#5f6e8a", a.state];
+      const when = a.mins_since == null ? "never" : (a.mins_since < 90 ? Math.round(a.mins_since) + "m ago" : (a.mins_since/60).toFixed(1) + "h ago");
+      return '<div class="row" style="display:flex;align-items:center;gap:10px">'
+        + '<span style="width:8px;height:8px;border-radius:50%;background:' + st[0] + ';flex:none"></span>'
+        + '<div style="flex:1;min-width:0"><b>' + esc(a.name.replace("refnet-","")) + "</b>"
+        + (a.does ? '<div class="meta">' + esc(a.does) + "</div>" : "")
+        + "</div>"
+        + '<div class="meta" style="text-align:right;white-space:nowrap">every ' + a.every_mins + "m · ran " + when
+        + "<br>" + a.runs_24h + " runs/24h" + (a.fails_24h ? ' · <b style="color:var(--red)">' + a.fails_24h + " failed</b>" : "") + "</div></div>";
+    }).join("");
+  } else if (which === "ai") {
+    const ai = d.ai;
+    body = '<div class="meta" style="margin-bottom:10px"><b>$' + ai.cost_est.toFixed(2) + "</b> across <b>" + ai.calls
+      + "</b> model calls in 24h · " + (ai.input_tokens/1000).toFixed(0) + "k in / " + (ai.output_tokens/1000).toFixed(0) + "k out."
+      + "<br>Estimated at $" + ai.rates.input_per_mtok + "/M in and $" + ai.rates.output_per_mtok + "/M out. "
+      + "<b>This is an estimate</b> — the Anthropic console is the authority on the bill.</div>";
+    body += '<table style="width:100%"><tr><th style="text-align:left">What the AI did</th><th>Calls</th><th class="money">Est. cost</th></tr>'
+      + (ai.by_kind || []).map(function (k) {
+        return "<tr><td>" + esc(String(k.kind).replace(/^refnet-/, "").replace(/-/g, " ")) + "</td><td>" + k.calls
+          + '</td><td class="money">$' + k.cost.toFixed(3) + "</td></tr>";
+      }).join("") + "</table>";
+    if (!(ai.by_kind || []).length) body += '<div class="empty">No model calls in the last 24 hours.</div>';
+  } else if (which === "texts") {
+    const t = d.texts;
+    body = '<div class="meta">' + t["in"] + " texts in, " + t.out + " texts out, " + t.calls + " calls in the last 24 hours."
+      + "<br>Last activity of any kind: " + (t.quiet_mins == null ? "unknown" : t.quiet_mins + " minutes ago") + "."
+      + "<br>RingCentral sync runs every minute; inbound also arrives instantly by webhook.</div>"
+      + '<div style="margin-top:10px"><a href="#/messages" class="btn ghost" style="text-decoration:none" onclick="closeBots()">Open Messages</a></div>';
+  } else {
+    body = '<div class="meta">' + esc((d.pills.find(function(x){return x.key===which;})||{}).tip || "")
+      + '</div><div style="margin-top:10px"><a href="#/leads" class="btn ghost" style="text-decoration:none" onclick="closeBots()">Open Leads</a></div>';
+  }
+  const titles = { agents:"🤖 The agents", texts:"💬 Texting", leads:"📥 New leads", ai:"🧠 AI usage & spend" };
+  let ov = document.getElementById("botov");
+  if (!ov) { ov = document.createElement("div"); ov.id = "botov"; document.body.appendChild(ov); }
+  ov.setAttribute("style", "position:fixed;inset:0;background:rgba(16,24,40,.42);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:70px 16px;overflow:auto");
+  ov.innerHTML = '<div class="card" style="max-width:660px;width:100%;margin:0" onclick="event.stopPropagation()">'
+    + '<h2 style="display:flex;justify-content:space-between;align-items:center">' + (titles[which] || "Status")
+    + '<button class="btn ghost" style="padding:4px 11px" onclick="closeBots()">Close</button></h2>'
+    + '<div class="body">' + body + "</div></div>";
+  ov.onclick = closeBots;
+};
+window.closeBots = function () { const o = document.getElementById("botov"); if (o) o.remove(); };
 const V = () => document.getElementById("view");
 function route() {
-  const h = location.hash || "#/dashboard";
+  const h = location.hash || "#/home";
   const m = MODULES.find(m => m.match(h)) || MODULES[0];
   clearInterval(window.__msgPoll); window.__msgPoll = null;
   renderShell(); m.render();
 }
 window.addEventListener("hashchange", route);
 
-/* ---------- DASHBOARD (the cockpit cards, behind login) ---------- */
-async function viewDashboard() {
-  V().innerHTML = `<h1>Dashboard</h1><div class="sub" id="stamp">loading…</div><div id="d"></div>`;
+/* ---------- HOME (Josh 2026-08-18: "I don't think live feed and dashboard both make sense") ----------
+   One screen for "what is happening and what needs me". The pay queue and the partner scorecard
+   used to live here as well; they were removed, not moved — Owed and Agents already own them,
+   and a second place to pay a showing agent is a second place to pay them twice. */
+async function viewHome() {
+  V().innerHTML = `<h1>Home</h1><div class="sub" id="stamp">loading…</div>
+    <div id="needs"></div>
+    <div id="d"></div>
+    <div class="card"><h2>🆕 Newest leads</h2><div class="body" id="newleads">…</div></div>
+    <div class="card"><h2>⚡ Live activity</h2><div class="body" id="feed">Loading…</div></div>`;
+  await drawHomeCards();
+  await drawFeed();
+  clearInterval(window.__feedPoll);
+  window.__feedPoll = setInterval(drawFeed, 10000);
+}
+async function drawHomeCards() {
   const d = await api("");
   document.getElementById("stamp").textContent = "as of " + d.generated_et + " ET";
+  // The three things that cost money while they sit, above everything else on the page.
+  try {
+    // the pills fetch is async and may not have landed on first paint — ask directly if so
+    const b = window.__bots || await api("?fn=bots").catch(() => ({}));
+    const [bd, cm] = await Promise.all([api("?fn=leads&section=board"), api("?fn=leads&section=commitments")]);
+    const bits = [];
+    if (bd.counts && bd.counts.total) bits.push(['<a href="#/board">', bd.counts.total + " waiting for an agent", "</a>"].join(""));
+    if (b.awaiting_verify) bits.push(['<a href="#/owed">', b.awaiting_verify + " showing" + (b.awaiting_verify>1?"s":"") + " to confirm", "</a>"].join(""));
+    if (cm.overdue) bits.push(['<a href="#/owed">', cm.overdue + " promise" + (cm.overdue>1?"s":"") + " past due", "</a>"].join(""));
+    const n = document.getElementById("needs");
+    if (n) n.innerHTML = bits.length
+      ? '<div class="card" style="border-color:#f0dfae;background:#fffdf6"><div class="body" style="font-size:14px;font-weight:600;color:var(--brand)">Needs you now: ' + bits.join(" &nbsp;·&nbsp; ") + "</div></div>"
+      : '<div class="card" style="border-color:#cfe9dd;background:#f5fbf8"><div class="body" style="font-size:14px;color:var(--green);font-weight:600">Nothing is waiting on you.</div></div>';
+  } catch (e) { /* the strip is a bonus, never a blocker */ }
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
   let hh = "";
   hh += `<div class="card"><h2>🚨 Open alerts (${d.alerts.length})</h2><div class="body">` + (d.alerts.length ? d.alerts.slice(0,12).map(a =>
     `<div class="row"><span class="kind ${a.kind.includes("hot")?"hot":""}">${esc(a.kind)}</span>${esc(a.message)}
      <div class="meta">${et(a.created_at)} · <a href="#" onclick="resolveAlert('${a.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
     + (d.alerts.length>12?`<div class="meta" style="padding-top:8px">+ ${d.alerts.length-12} more</div>`:"") : `<div class="empty">All clear.</div>`) + `</div></div>`;
-  hh += `<div class="card"><h2>💵 Pay queue</h2><div class="body">` + (d.payables?.length ?
-    `<div style="overflow-x:auto"><table><tr><th>Partner</th><th>For</th><th class="money">Amount</th><th>Status</th><th></th></tr>` +
-    d.payables.map(p => `<tr><td><span class="whoName">${esc(p.refnet_partner_agents?.full_name??"?")}</span>${p.refnet_partner_agents?.payout_method?`<div class="meta">pays via ${esc(p.refnet_partner_agents.payout_method.replace("_"," "))}</div>`:`<div class="meta">payout method not on file</div>`}</td>
-      <td>${esc(p.memo??p.kind)}</td><td class="money">${$(p.status==="paid"?p.paid_usd:p.estimate_usd)}${p.is_estimate&&p.status!=="paid"?'<div class="meta">estimate</div>':""}</td>
-      <td><span class="kind${p.status==="pending_approval"?" hot":""}">${esc(p.status.replace("_"," "))}</span></td>
-      <td>${p.status==="pending_approval"?`<button onclick="approvePayable('${p.id}',${!!p.is_estimate})">Approve</button>`:p.status==="approved"?`<button onclick="markPaid('${p.id}')">Mark paid</button>`:""}</td></tr>`).join("") + `</table></div>` : `<div class="empty">Nothing owed.</div>`) + `</div></div>`;
+  // Pay queue lives on Owed now — one place to pay someone, with amount and method recorded.
   hh += `<div class="card"><h2>💰 Deal economics (projected)</h2><div class="body">` + (d.economics?.length ?
     `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">Price</th><th class="money">GCI</th><th class="money">Net to us</th></tr>` +
     d.economics.map(e => `<tr><td><span class="whoName">${esc(e.client)}</span>${e.partner?`<div class="meta">via ${esc(e.partner)}</div>`:""}</td>
       <td>${e.badges.title?'<span class="badge b-title">TITLE</span>':""}${e.badges.mortgage?'<span class="badge b-mortgage">MORTGAGE</span>':""}${e.badges.insurance?'<span class="badge b-insurance">INSURANCE</span>':""}${e.badges.listing?'<span class="badge b-listing">LISTING</span>':""}</td>
       <td><span class="kind">${esc(e.status)}</span></td><td class="money">${$(e.est_purchase_price)}</td><td class="money">${$(e.gci)}</td><td class="money net">${$(e.projected_net)}</td></tr>`).join("") + `</table></div>
     <div class="meta" style="margin-top:8px">Assumptions: ${d.financials_config.buyer_commission_pct}% GCI · $${d.financials_config.broker_fee_flat} broker fee (placeholders until Josh's real numbers).</div>` : `<div class="empty">No deals in motion with a price set.</div>`) + `</div></div>`;
-  hh += `<div class="card"><h2>🏆 Partner scorecard</h2><div class="body">` + (d.scorecard.length ?
-    `<table><tr><th>Partner</th><th>Shown</th><th>Great</th><th>No-shows</th><th class="money">Est. fees</th></tr>` +
-    d.scorecard.map(s => `<tr><td>${esc(s.full_name)}</td><td>${s.showings_verified}/${s.showings_total}</td><td>${s.great_showings}</td><td>${s.no_shows}</td><td class="money">$${(+s.est_fees_earned_usd).toFixed(0)}</td></tr>`).join("") + `</table>` : `<div class="empty">No partners yet.</div>`) + `</div></div>`;
+  // Partner scorecard lives on Agents now, next to the agreements and payout methods it needs.
   document.getElementById("d").innerHTML = hh;
 }
-window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); viewDashboard(); };
-window.approvePayable = async (id, isEst) => {
-  let actual = null;
-  if (isEst) { const v = prompt("This amount is an ESTIMATE. Enter the ACTUAL amount (blank = approve estimate):"); if (v === null) return; if (v.trim() !== "") actual = Number(v); }
-  await api("", { method:"POST", body: JSON.stringify({ action:"approve_payable", payable_id:id, actual_usd:actual }) }); viewDashboard();
-};
-window.markPaid = async (id) => { if (confirm("Mark PAID? (Record-keeping — actual payment is made by a human through the broker.)")) { await api("", { method:"POST", body: JSON.stringify({ action:"mark_paid", payable_id:id }) }); viewDashboard(); } };
+window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); viewHome(); };
+// approvePayable / markPaid were removed with the Home pay-queue card. They were the OLD way to
+// settle a debt — "mark paid" with no amount and no method — and leaving them reachable meant two
+// different records of the same payment could exist. Owed is the one place now, and it insists on
+// what was actually sent and how.
 
 /* ---------- MESSAGES (INRE two-way SMS widget pattern) ---------- */
 let SELCONV = null, THREADSIG = "";
@@ -505,31 +603,25 @@ const FEEDLABEL = {
   hot_sla_nudge:"🔥 SLA nudge", draft_approved_reply:"✅ Tony's reply", manual_app_send:"✅ Manual send",
   optout_confirm:"🛑 Opt-out confirmed", task_reminder:"📋 Task reminder", call:"📞 Call", inbound:"⬅ They texted", outbound:"➡ Text",
 };
-async function viewFeed() {
-  V().innerHTML = `<h1>Live Feed</h1><div class="sub" id="feedsub">Everything the machine does, as it happens. Refreshes every 10 seconds.</div>
-    <div class="card"><h2>🆕 Newest leads</h2><div class="body" id="newleads">…</div></div>
-    <div class="card"><h2>⚡ Activity</h2><div class="body" id="feed">Loading…</div></div>`;
-  const load = async () => {
-    if (!location.hash.startsWith("#/feed")) { clearInterval(window.__feedPoll); window.__feedPoll = null; return; }
-    const d = await api("?section=feed");
-    refreshModeBadge();
-    const nl = document.getElementById("newleads"); if (!nl) return;
-    nl.innerHTML = (d.new_leads||[]).map(l =>
-      `<div class="row"><span class="whoName">${esc((l.first_name||"")+" "+(l.last_name||""))}</span>
-       <span class="kind">${esc(l.intent||"new")}</span> ${esc(l.first_inquiry_city||"")}
-       ${l.est_purchase_price?`· $${Number(l.est_purchase_price).toLocaleString()}`:""}
-       <span class="meta">${et(l.created_at)}</span></div>`).join("") || `<div class="empty">No leads yet.</div>`;
-    document.getElementById("feed").innerHTML = (d.feed||[]).map(f => {
-      const label = FEEDLABEL[f.type] || (f.dir==="in"?"⬅ "+f.type:"➡ "+f.type);
-      const st = f.status && f.status!=="sent" ? ` <span class="kind ${f.status==="blocked_allowlist"?"":"hot"}">${esc(f.status)}</span>` : "";
-      return `<div class="row"><span class="kind">${esc(label)}</span>
-        <span class="whoName">${esc(f.who||"")}</span>${st}
-        <div class="meta">"${esc(f.body)}"</div><div class="meta">${et(f.at)}</div></div>`;
-    }).join("") || `<div class="empty">Quiet so far — activity appears here the moment it happens.</div>`;
-  };
-  await load();
-  clearInterval(window.__feedPoll);
-  window.__feedPoll = setInterval(load, 10000);
+async function drawFeed() {
+  if (!location.hash.startsWith("#/home") && location.hash !== "" && location.hash !== "#/") {
+    clearInterval(window.__feedPoll); window.__feedPoll = null; return;
+  }
+  const d = await api("?section=feed");
+  refreshModeBadge();
+  const nl = document.getElementById("newleads"); if (!nl) return;
+  nl.innerHTML = (d.new_leads||[]).map(l =>
+    `<div class="row"><span class="whoName">${esc((l.first_name||"")+" "+(l.last_name||""))}</span>
+     <span class="kind">${esc(l.intent||"new")}</span> ${esc(l.first_inquiry_city||"")}
+     ${l.est_purchase_price?`· $${Number(l.est_purchase_price).toLocaleString()}`:""}
+     <span class="meta">${et(l.created_at)}</span></div>`).join("") || `<div class="empty">No leads yet.</div>`;
+  document.getElementById("feed").innerHTML = (d.feed||[]).map(f => {
+    const label = FEEDLABEL[f.type] || (f.dir==="in"?"⬅ "+f.type:"➡ "+f.type);
+    const st = f.status && f.status!=="sent" ? ` <span class="kind ${f.status==="blocked_allowlist"?"":"hot"}">${esc(f.status)}</span>` : "";
+    return `<div class="row"><span class="kind">${esc(label)}</span>
+      <span class="whoName">${esc(f.who||"")}</span>${st}
+      <div class="meta">"${esc(f.body)}"</div><div class="meta">${et(f.at)}</div></div>`;
+  }).join("") || `<div class="empty">Quiet so far — activity appears here the moment it happens.</div>`;
 }
 
 /* ---------- AGENTS (partners + recruiting bench) ---------- */
@@ -579,8 +671,9 @@ async function viewOwed() {
   V().innerHTML = `<h1>Owed</h1>
     <div class="sub">What we told people we'd do, and who we owe money to. Both cost the next deal if they sit.</div>
     <div class="card"><h2>🤝 Promises we made</h2><div class="body" id="commits">Loading…</div></div>
+    <div class="card"><h2>✅ Did the showing happen?</h2><div class="body" id="verifyq">Loading…</div></div>
     <div class="card"><h2>💵 Pay the showing agents</h2><div class="body" id="payq">Loading…</div></div>`;
-  await drawCommitments(); await drawPayQueue();
+  await drawVerifyQueue(); await drawCommitments(); await drawPayQueue();
 }
 async function drawCommitments() {
   const d = await lapi("&section=commitments");
@@ -610,6 +703,40 @@ window.commitDone = async (id) => {
   if (!confirm("Mark this promise as done?")) return;
   await lapi("", { method:"POST", body: JSON.stringify({ action:"commitment_done", task_id:id, done_by:(ME&&ME.full_name)||"app" }) });
   drawCommitments();
+};
+/* ---------- DID THE SHOWING HAPPEN? (Josh 2026-08-18) ----------
+   Brandi showed a house and never entered the pay queue, because nothing ever established
+   that the showing took place. The AI asks the client first; whatever it cannot settle lands
+   here for a person. Push it forward and the fee accrues. Say it did not happen — with a
+   reason, always a reason — and it leaves for good and can never become money. */
+async function drawVerifyQueue() {
+  const d = await lapi("&section=verify_queue");
+  window.__verify = d.awaiting || [];
+  const el = document.getElementById("verifyq"); if (!el) return;
+  if (!window.__verify.length) { el.innerHTML = '<div class="empty">Every finished showing is settled. Nothing is waiting on a human.</div>'; return; }
+  el.innerHTML = `<div class="meta" style="margin-bottom:8px">${window.__verify.length} showing${window.__verify.length>1?"s":""} finished and unconfirmed${d.at_stake?` · <b>${Number(d.at_stake).toFixed(0)}</b> cannot be paid until someone says these happened`:""}.</div>`
+    + window.__verify.map((r, i) => `<div class="row" style="border-left:3px solid var(--amber,#e0a800);padding-left:10px">
+      <div><b>${esc(r.agent||"showing agent")}</b> showed <b>${esc(r.client||"the client")}</b>${r.is_team?' <span class="kind">in-house</span>':` · <b>${Number(r.fee_at_stake||0).toFixed(0)}</b> at stake`}</div>
+      <div class="meta">${esc(r.property_address||"")} · scheduled ${et(r.scheduled_at)} · ${Math.round(r.hours_since)}h ago</div>
+      ${r.agent_said?`<div class="meta" style="margin-top:4px">Agent said: <i>${esc(r.agent_said)}</i></div>`:""}
+      ${r.client_said?`<div class="meta">Client said: <i>${esc(r.client_said)}</i></div>`:""}
+      <div class="meta">${r.human_touched_after?"A person already spoke with them after the tour.":r.verify_asks?`Asked the client ${r.verify_asks}x by text, no answer yet.`:"We have asked no one yet."}</div>
+      <div style="margin-top:6px">
+        <button onclick="settleShowing('${r.id}', 'happened', ${i})">Yes, it happened</button>
+        <button class="btn ghost" style="margin-left:6px" onclick="settleShowing('${r.id}', 'did_not_happen', ${i})">It did not happen</button>
+        <input id="vn${i}" placeholder="If it did not: why? (required)" style="width:280px;display:inline-block;margin-left:6px">
+      </div></div>`).join("");
+}
+window.settleShowing = async (id, outcome, i) => {
+  const note = (document.getElementById("vn"+i)||{}).value || "";
+  if (outcome === "did_not_happen" && !note.trim()) { alert("Say why it did not happen. That reason is the only record we will have of it."); return; }
+  const msg = outcome === "happened"
+    ? "Confirm this showing took place? The showing fee becomes owed."
+    : "Mark this showing as never happened? It leaves the queue and no fee will ever be paid for it.";
+  if (!confirm(msg)) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"verify_showing", showing_id:id, outcome, note, by:(ME&&ME.full_name)||"app" }) });
+  if (r.error) { alert("Not settled: " + r.error); return; }
+  await drawVerifyQueue(); await drawPayQueue();
 };
 async function drawPayQueue() {
   const d = await lapi("&section=pay_queue");
