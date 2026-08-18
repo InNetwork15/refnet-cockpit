@@ -158,7 +158,7 @@ function renderLogin(err, notice) {
 /* ---------- SHELL + ROUTER (INRE MODULES pattern) ---------- */
 const MODULES = [
   { id:"home",      nav:"Home",      match: h => h.startsWith("#/home") || h === "#/" || h === "#" || h === "", render: () => viewHome() },
-  { id:"board",     nav:"Board",     match: h => h.startsWith("#/board"),     render: () => viewBoard() },
+  { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board"),     render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
@@ -990,12 +990,23 @@ window.logPayment = async (id, i) => {
    The one screen that answers "three tour requests came in today — are all three assigned?"
    Sorted by how long each buyer has been waiting, because that is the number that kills deals.
    Under 2h is fresh, 2-24h is late, past a day a Zillow buyer has usually moved on. */
+/* ---------- THE PIPELINE (Josh 2026-08-18) ----------
+   "Where and how should I check that all leads are assigned to an agent or a recruiter. Then a
+   place where recruiting is taking place and followed up on. Then an area to follow up on all
+   leads that have been assigned, and then leads that have scheduled showings."
+
+   Four lanes, in that order, because that is the order a lead actually moves through and the
+   order in which neglect costs money. Coverage is computed from the showing request and open
+   recruiting jobs -- NOT the funnel's stage column, which disagreed with reality (it said 7
+   needed coverage when the real answer was 6). A board that argues with itself gets ignored. */
 async function viewBoard() {
-  V().innerHTML = `<h1>Coverage board</h1>
-    <div class="sub">Buyers who want to see a house and have nobody to show it. Longest wait first.</div>
-    <div id="btiles" class="ztiles"></div>
-    <div class="card"><h2>⏱ Needs coverage</h2><div class="body" id="btable">Loading…</div></div>
-    <div class="card"><h2>📊 The funnel</h2><div class="body" id="bfunnel">…</div></div>`;
+  V().innerHTML = `<h1>Pipeline</h1>
+    <div class="sub">Every lead that wants a tour, and whose hands it is in right now.</div>
+    <div id="ptiles" class="ztiles"></div>
+    <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>
+    <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>
+    <div class="card"><h2>✅ Assigned — is anything happening?</h2><div class="body" id="p3">…</div></div>
+    <div class="card"><h2>📅 Showings on the books</h2><div class="body" id="p4">…</div></div>`;
   await drawBoard();
   window.__boardPoll = setInterval(() => {
     if (!location.hash.startsWith("#/board")) { clearInterval(window.__boardPoll); window.__boardPoll = null; return; }
@@ -1003,45 +1014,59 @@ async function viewBoard() {
   }, 60000);
 }
 async function drawBoard(silent) {
-  const [b, f] = await Promise.all([lapi("&section=board"), lapi("&section=funnel")]);
-  window.__board = b; window.__funnel = f;
-  const c = b.counts || {};
-  const cont = (f.containment || [])[0] || {};
-  document.getElementById("btiles").innerHTML = `
-    <div class="ztile"><span>Needs coverage</span><b>${c.total ?? 0}</b><em>${c.today ?? 0} in the last 24h</em></div>
-    <div class="ztile"><span>Fresh · under 2h</span><b style="color:var(--green)">${c.fresh ?? 0}</b><em>still winnable</em></div>
-    <div class="ztile"><span>Late · 2–24h</span><b style="color:var(--amber)">${c.late ?? 0}</b><em>slipping</em></div>
-    <div class="ztile"><span>Cold · over a day</span><b style="color:var(--red)">${c.cold ?? 0}</b><em>usually gone</em></div>
-    <div class="ztile"><span>Machine handled</span><b>${cont.containment_pct ?? "—"}%</b><em>today, without a human</em></div>`;
-  const rows = b.board || [];
-  document.getElementById("btable").innerHTML = rows.length ? `<div style="overflow-x:auto"><table><thead><tr>
-      <th>Waiting</th><th>Buyer</th><th>Property</th><th>ZIP</th><th class="money">Price</th><th>Tried</th><th></th></tr></thead><tbody>
-      ${rows.map(r => `<tr>
-        <td><span class="st ${r.heat==="cold"?"st-needs":r.heat==="late"?"st-needs":"st-answered"}">${waitFor(Math.round((r.hours_in_play||0)*60))}</span></td>
-        <td><b>${esc(r.name||"(no name)")}</b>${r.lane==="vl"?' <span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>':""}</td>
-        <td>${esc(r.property_address || r.city || "—")}</td>
-        <td>${esc(r.zip||"—")}</td>
-        <td class="money">${r.price?"$"+Number(r.price).toLocaleString():"—"}</td>
-        <td class="meta">${r.tried ? esc(r.tried.status)+" · "+r.tried.candidates+" candidates" : "nothing yet"}</td>
-        <td><a href="#/leads" onclick="jumpToLead('${r.lead_id}');return false">open →</a></td></tr>`).join("")}
-      </tbody></table></div>` : `<div class="empty">Nothing waiting on coverage. 🎉</div>`;
-  const st = f.by_stage || {};
-  const stageRow = [["new","New"],["qualified","Qualified"],["engaged","Engaged"],["needs_coverage","Needs coverage"],["covered","Covered"],["shown","Shown"]];
-  document.getElementById("bfunnel").innerHTML = `
-    <div class="ztiles" style="margin-bottom:12px">${stageRow.map(([k,l]) =>
-      `<div class="ztile"><span>${l}</span><b>${st[k] ?? 0}</b></div>`).join("")}</div>
-    <div class="meta" style="margin-bottom:6px">Human minutes logged: <b>${f.human_minutes_total ?? 0}</b>${f.human_minutes_per_shown?` · ~${f.human_minutes_per_shown} per showing reached`:""}. ${esc(f.minutes_note||"")}</div>
-    <div id="fzip"></div>`;
-  drawFunnelZip();
+  const d = await lapi("&section=pipeline");
+  if (!document.getElementById("p1")) return;
+  const c = d.counts || {};
+  const wait = (h) => h == null ? "" : (h < 1 ? "just now" : h < 48 ? h + "h" : Math.round(h / 24) + "d");
+
+  document.getElementById("ptiles").innerHTML =
+    `<div class="ztile"><span>Nobody on it</span><b style="color:${c.uncovered ? "var(--red)" : "var(--green)"}">${c.uncovered ?? 0}</b><em>want a tour, unassigned</em></div>
+     <div class="ztile"><span>Recruiting</span><b>${c.recruiting ?? 0}</b><em>jobs running</em></div>
+     <div class="ztile"><span>Assigned</span><b>${c.assigned ?? 0}</b><em>someone owns it</em></div>
+     <div class="ztile"><span>Showings booked</span><b>${c.showings ?? 0}</b><em>on the calendar</em></div>
+     <div class="ztile"><span>Not waiting on us</span><b>${c.no_agent_needed ?? 0}</b><em>of ${c.leads_live ?? 0} live — questions & nurture</em></div>`;
+
+  // 1 — nobody on it. The only lane that is an emergency.
+  document.getElementById("p1").innerHTML = (d.uncovered || []).length
+    ? `<div class="meta" style="margin-bottom:8px">Longest wait first. Each one wants to see a house and has no agent and no recruiting running.</div>`
+      + d.uncovered.map(u => `<div class="row" style="border-left:3px solid var(--red);padding-left:10px">
+          <div><b>${esc(u.name)}</b> <span class="kind hot">waiting ${wait(u.hours_waiting)}</span></div>
+          <div class="meta">${esc(u.property || "(no address)")}${u.price ? " · $" + Number(u.price).toLocaleString() : ""} · ${esc(String(u.intent || "").replace(/_/g, " "))}</div>
+          <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/leads" onclick="jumpToLead('${u.lead_id}')">Open lead → assign or recruit</a></div>
+        </div>`).join("")
+    : `<div class="empty">Everyone who wants a tour has someone on it. 🎉</div>`;
+
+  // 2 — recruiting, with the follow-up numbers that say whether it is actually moving
+  document.getElementById("p2").innerHTML = (d.recruiting || []).length
+    ? `<div style="overflow-x:auto"><table><tr><th>City</th><th>For</th><th>Open</th><th>Candidates</th><th>Texted</th><th>Said no</th><th>Left</th><th></th></tr>`
+      + d.recruiting.map(j => `<tr${j.contacted === 0 && j.hours_open > 24 ? ' style="background:#fffaf3"' : ""}>
+          <td><b>${esc(j.city || "?")}</b></td>
+          <td class="meta">${esc(j.lead || "—")}</td>
+          <td class="meta">${wait(j.hours_open)}${j.contacted === 0 && j.hours_open > 24 ? ' <span class="kind hot">nobody texted yet</span>' : ""}</td>
+          <td>${j.candidates}</td><td>${j.contacted}</td><td>${j.declined || 0}</td>
+          <td><b>${j.left}</b></td>
+          <td>${j.lead_id ? `<a class="btn ghost" style="padding:4px 9px;font-size:11px;text-decoration:none" href="#/agents">Open bench</a>` : ""}</td>
+        </tr>`).join("") + `</table></div>`
+    : `<div class="empty">No recruiting running.</div>`;
+
+  // 3 — assigned. The question here is not "who" but "and then what".
+  document.getElementById("p3").innerHTML = (d.assigned || []).length
+    ? d.assigned.map(a => `<div class="row" style="border-left:3px solid ${a.has_showing_booked ? "var(--green)" : "var(--amber)"};padding-left:10px">
+        <div><b>${esc(a.name)}</b> → <b>${esc(a.agent)}</b>${a.is_team ? ' <span class="kind">in-house</span>' : ""}
+          ${a.has_showing_booked ? '<span class="kind lane-agent">showing booked</span>' : '<span class="kind" style="background:#fdf1dc;color:#8a5a00">no showing booked yet</span>'}</div>
+        <div class="meta">${esc(a.property || "")} · assigned ${wait(a.hours_since_assigned)} ago${a.agent_phone ? " · agent " + esc(fmtPh(a.agent_phone)) : ""}</div>
+        <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/leads" onclick="jumpToLead('${a.lead_id}')">Open lead</a></div>
+      </div>`).join("")
+    : `<div class="empty">Nothing assigned yet.</div>`;
+
+  // 4 — showings. Past-but-unverified sits at the top, because that is money that cannot be paid.
+  document.getElementById("p4").innerHTML = (d.showings || []).length
+    ? d.showings.slice().sort((x, y) => Number(y.past) - Number(x.past)).map(s => `<div class="row">
+        <div><b>${esc(s.property || "")}</b> ${s.past ? '<span class="kind hot">past — needs verifying</span>' : `<span class="kind lane-agent">in ${wait(s.hours_away)}</span>`}</div>
+        <div class="meta">${et(s.scheduled_at)} · ${esc(s.client || "client")} with ${esc(s.agent || "an agent")} · ${s.confirmed ? "confirmed" : "not confirmed by the agent"}</div>
+      </div>`).join("")
+    : `<div class="empty">No showings on the books.</div>`;
 }
-/* Funnel-by-ZIP: city sits next to the ZIP (five digits mean nothing on their own), and every
-   column sorts — click once for the sensible direction, again to reverse. */
-let FZSORT = { key: "needs_coverage", dir: -1 };
-window.sortFZ = (key) => {
-  if (FZSORT.key === key) FZSORT.dir = -FZSORT.dir;
-  else FZSORT = { key, dir: (key === "key" || key === "label") ? 1 : -1 };
-  drawFunnelZip();
-};
 function drawFunnelZip() {
   const el = document.getElementById("fzip"); if (!el) return;
   const rows = [...((window.__funnel || {}).by_zip || [])];
