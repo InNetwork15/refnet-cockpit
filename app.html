@@ -379,6 +379,29 @@ async function drawHomeCards() {
   // Partner scorecard lives on Agents now, next to the agreements and payout methods it needs.
   document.getElementById("d").innerHTML = hh;
 }
+/* ---------- NURTURE (Josh 2026-08-18) ----------
+   The third exit. A lead nobody should be chasing looked exactly like a lead nobody had got to,
+   so both sat in "nobody is covering this yet". Nurturing asks for a reason and a date, because
+   "not ready" with neither is indistinguishable from neglect when you read it back next month.
+   It closes any recruiting for them and books a task to bring them back. */
+window.nurtureLead = async (leadId) => {
+  const note = prompt("Why is this one not ready?\n\ne.g. \"non-responsive, just browsing\", \"selling their place first\", \"financing not sorted\".\n\nThis is what you will read when they resurface.");
+  if (note === null) return;
+  const raw = prompt("Check back in how many days?", "14");
+  if (raw === null) return;
+  const days = Number(raw) || 14;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"set_nurture", lead_id: leadId, note, check_in_days: days, by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not saved: " + r.error); return; }
+  alert("Moved to nurture. Any recruiting for them is closed, and a task will bring them back in " + days + " days.");
+  loadLead(leadId);
+};
+window.endNurture = async (leadId) => {
+  if (!confirm("Put this lead back into the active pipeline?")) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"end_nurture", lead_id: leadId }) });
+  if (r.error) { alert("Not changed: " + r.error); return; }
+  loadLead(leadId);
+};
 /* ---------- RECORD AN OFFER (Josh 2026-08-18) ----------
    The one human act that turns commission projection on. Kept explicit and confirmable: an
    offer entered by mistake puts money on the board that nobody agreed to. */
@@ -1154,7 +1177,11 @@ async function loadLead(id) {
         <b style="color:var(--green)">✅ ${esc(d.coverage.agent)} is covering this${d.coverage.is_team ? " (in-house)" : ""}</b>
         <div class="meta">${esc(d.coverage.address || L.first_inquiry_address || "")}${d.coverage.phone ? " · " + esc(fmtPh(d.coverage.phone)) : ""} · ${esc(String(d.coverage.status || "").replace(/_/g, " "))}</div></div>`
         : `<div style="margin-top:10px" class="meta">Nobody is covering this yet.</div>`}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button></div>
+      ${d.nurture ? `<div style="margin-top:10px;background:#f4f1fb;border:1px solid #ddd4f5;border-radius:10px;padding:9px 12px">
+        <b style="color:var(--purple)">🌱 Nurturing — not ready yet</b>
+        <div class="meta">${d.nurture.note ? esc(d.nurture.note) + " · " : ""}set by ${esc(d.nurture.by || "someone")} ${et(d.nurture.since)}${d.nurture.check_at ? " · checking back " + et(d.nurture.check_at) : ""}</div>
+        <button class="btn ghost" style="margin-top:6px;padding:4px 10px;font-size:11.5px" onclick="endNurture('${L.id}')">Back to active</button></div>` : ""}
+      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
