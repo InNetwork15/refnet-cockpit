@@ -159,6 +159,7 @@ function renderLogin(err, notice) {
 const MODULES = [
   { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
   { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
+  { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
@@ -568,6 +569,110 @@ window.startOutreach = async (json) => {
 };
 
 /* ---------- MAP ---------- */
+/* ---------- LEADS (Josh 2026-08-17) ----------
+   The lead file: who they are, every text/call/email in one stream, the call summaries the
+   transcriber wrote, and WHY the machine called them a tour request vs a question vs nurture.
+   Plus the button that opens recruiting for a chosen property address. */
+let LSEL = null, LFILTER = "";
+const lapi = (qs, opts) => api("?fn=leads" + qs, opts);
+const LANE_LABEL = { vl: "VL — vacant land", client: "client" };
+async function viewLeads() {
+  V().innerHTML = `<h1>Leads</h1>
+    <div class="sub">Every lead, the whole conversation, and why the machine classified them the way it did.</div>
+    <div class="zchips" id="lchips"></div>
+    <div class="msgshell"><div class="convlist" id="leadlist">Loading…</div>
+    <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a lead.</div></div></div>`;
+  drawLChips(); await refreshLeads();
+}
+function drawLChips() {
+  const opts = [["","All"],["client","Homes"],["vl","VL — vacant land"]];
+  document.getElementById("lchips").innerHTML = opts.map(([k,l]) =>
+    `<button class="${LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
+    + `<input id="lq" placeholder="Search name, city, address, ZIP…" style="width:260px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
+        onkeydown="if(event.key==='Enter')refreshLeads()">`;
+}
+window.setLFilter = (k) => { LFILTER = k; drawLChips(); refreshLeads(); };
+async function refreshLeads() {
+  const q = (document.getElementById("lq")?.value || "").trim();
+  const d = await lapi("&section=lead_list" + (LFILTER?"&lane="+LFILTER:"") + (q?"&q="+encodeURIComponent(q):""));
+  window.__leads = d.leads || [];
+  const el = document.getElementById("leadlist"); if (!el) return;
+  el.innerHTML = window.__leads.map((l, i) => `<div class="convrow ${LSEL&&LSEL.id===l.id?"sel":""}" onclick="openLeadIdx(${i})">
+      <span class="whoName">${esc(l.name)}</span>
+      ${l.lane==="vl"?`<span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>`:""}
+      ${l.do_not_contact?`<span class="kind hot">opted out</span>`:""}
+      <div style="margin:3px 0 1px"><span class="st ${l.intent==="tour_request"?"st-answered":l.intent==="nurture"?"st-waiting":"st-needs"}">${esc(l.intent_label||l.intent||"?")}</span>
+        ${l.ever_replied?`<span class="st st-answered">replied</span>`:""}</div>
+      <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
+      <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
+    </div>`).join("") || `<div class="empty" style="padding:14px">No leads match.</div>`;
+}
+window.openLeadIdx = (i) => { const l = (window.__leads||[])[i]; if (!l) return; LSEL = l; refreshLeads(); loadLead(l.id); };
+async function loadLead(id) {
+  const d = await lapi("&section=lead&id=" + encodeURIComponent(id));
+  window.__lead = d;
+  const L = d.lead || {}, el = document.getElementById("leaddetail"); if (!el) return;
+  const name = `${L.first_name||""} ${L.last_name||""}`.trim() || "(no name)";
+  el.innerHTML = `<div class="thhead" style="flex-wrap:wrap">
+      <span class="whoName">${esc(name)}</span>
+      <span class="kind ${L.lane==="vl"?"":"lane-client"}" style="${L.lane==="vl"?"background:#efe7d9;color:#7a5a12":""}">${esc(LANE_LABEL[L.lane]||L.lane||"client")}</span>
+      <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span></div>
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f4">
+      <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
+        ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
+        ${L.wants?`<span class="kind">wants to ${esc(L.wants)}</span>`:""}</div>
+      ${L.why?`<div class="meta" style="font-size:12.5px"><b>Why:</b> ${esc(L.why)}</div>`:`<div class="meta">No reasoning recorded.</div>`}
+      <div class="meta" style="margin-top:6px">${esc(L.first_inquiry_address||"")}${L.first_inquiry_city?", "+esc(L.first_inquiry_city):""}
+        ${L.est_purchase_price?" · $"+Number(L.est_purchase_price).toLocaleString():""}${L.zip?" · "+esc(L.zip):""}</div>
+      ${(d.recruiting_jobs||[]).length?`<div class="meta" style="margin-top:6px">Recruiting: ${(d.recruiting_jobs||[]).map(j=>`${esc(j.status)} — ${esc(j.property_address||j.gap_city||"")} (${j.candidates} candidates)`).join(" · ")}</div>`:""}
+      ${d.land_walk?`<div class="meta" style="margin-top:6px">Walk permission: <b>${esc(d.land_walk.permission_status)}</b>${d.land_walk.listing_agent_name?" · "+esc(d.land_walk.listing_agent_name):""}</div>`:""}
+      <div style="margin-top:10px"><button onclick="openRecruitBox()">🤝 Recruit an agent for this lead</button></div>
+      <div id="recruitbox" style="display:none;margin-top:10px"></div>
+    </div>
+    <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
+  const m = document.getElementById("msgs"); if (m) m.scrollTop = m.scrollHeight;
+}
+function renderTimelineItem(t) {
+  const side = t.direction === "out" ? "out" : "";
+  const icon = t.kind === "call" ? "📞" : t.kind === "email" ? "✉️" : "";
+  return `<div class="bub ${side}" style="max-width:88%">
+    ${t.kind!=="text"?`<div style="font-weight:700;font-size:12px;margin-bottom:3px">${icon} ${t.kind==="email"?esc(t.subject||"(no subject)"):"Call"}</div>`:""}
+    ${esc((t.body||"").slice(0,1500))}
+    ${t.call_summary?`<div style="margin-top:5px;font-size:12px;background:rgba(255,255,255,.55);border-radius:8px;padding:6px"><b>Summary:</b> ${esc(t.call_summary)}</div>`:""}
+    ${t.action_items&&t.action_items.length?`<div style="margin-top:4px;font-size:12px"><b>Action items:</b> ${esc([].concat(t.action_items).join("; "))}</div>`:""}
+    ${t.transcript?`<div style="margin-top:4px"><a href="#" style="font-size:11.5px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';return false">show transcript</a><div style="display:none;font-size:11.5px;white-space:pre-wrap;margin-top:4px">${esc(t.transcript)}</div></div>`:""}
+    <span class="meta">${et(t.at)}${t.type?" · "+esc(t.type):""}${t.send_status&&t.send_status!=="sent"?" · "+esc(t.send_status):""}</span></div>`;
+}
+window.openRecruitBox = () => {
+  const d = window.__lead, box = document.getElementById("recruitbox");
+  if (!box) return;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  const addrs = d.addresses || [];
+  box.innerHTML = `<div class="meta" style="margin-bottom:6px">Which property should the agent cover? The recruiter researches candidates on its next hourly pass; you still tap Send per agent.</div>
+    <select id="raddr" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">
+      ${addrs.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join("")}
+      <option value="__manual__">— type a different address —</option></select>
+    <input id="rmanual" placeholder="Street, City" style="display:${addrs.length?"none":"block"};margin-bottom:6px">
+    <input id="rtime" placeholder="When? e.g. tomorrow 1:30 PM (optional)" style="margin-bottom:8px">
+    <button onclick="submitRecruit()">Open recruiting</button>
+    <button class="btn ghost" style="margin-left:6px" onclick="document.getElementById('recruitbox').style.display='none'">Cancel</button>`;
+  const sel = document.getElementById("raddr");
+  if (sel) sel.onchange = () => { document.getElementById("rmanual").style.display = sel.value === "__manual__" ? "block" : "none"; };
+};
+window.submitRecruit = async () => {
+  const sel = document.getElementById("raddr"), manual = document.getElementById("rmanual");
+  const address = (!sel || sel.value === "__manual__") ? (manual?.value||"").trim() : sel.value;
+  if (!address) { alert("Pick or type a property address first."); return; }
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"start_recruiting", lead_id: window.__lead.lead.id, property_address: address,
+    showing_time: (document.getElementById("rtime")?.value||"").trim() || null }) });
+  if (r.error) { alert("Not started: " + r.error); return; }
+  alert(r.existing ? "Recruiting is already open for that address." : "Recruiting opened for " + address + ". The recruiter will research candidates, then you tap Send per agent on the Agents page.");
+  document.getElementById("recruitbox").style.display = "none";
+  loadLead(window.__lead.lead.id);
+};
+
 /* ---------- LEADS BY ZIP (Josh 2026-08-17) ----------
    Where the lead flow actually comes from, and whether it's moving. One fetch carries every
    window (7/10/30/90/365/all), so the filter chips re-draw the map and re-sort the table
