@@ -808,15 +808,30 @@ async function viewAgents() {
       <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
     : `<div class="empty">No partners yet — recruit from the bench below.</div>`;
   document.getElementById("bench").innerHTML = (d.recruiting||[]).length ?
-    d.recruiting.map(j => `<div class="row"><span class="whoName">${esc(j.gap_city)}</span> <span class="kind">${esc(j.status)}</span> <span class="meta">${j.candidates.length} candidates · opened ${et(j.created_at)}</span>
+    d.recruiting.map(j => { const left = j.candidates.filter(c=>!c.contacted && !c.declined && c.phone).length; return `<div class="row"><span class="whoName">${esc(j.gap_city)}</span> <span class="kind">${esc(j.status)}</span> <span class="meta">${j.candidates.length} candidates · opened ${et(j.created_at)}</span>
+      ${(ME.role==="admin" && left) ? `<button style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="textAll('${j.id}','${esc(j.gap_city)}',${left})">📣 Text all ${left} left</button>` : ""}
       <div style="margin-top:6px">${j.candidates.map((c,i) => `
         <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed #f0f2f6">
           <div style="flex:1"><span class="whoName">${esc(c.name)}</span><span class="meta"> ${esc(c.brokerage||"")}${c.volume?` · ${esc(String(c.volume))}`:""}${c.units_area?` · ${esc(String(c.units_area))} in area`:""}${c.source?` · ${esc(c.source)}`:""}</span></div>
-          ${c.contacted ? '<span class="kind lane-agent">contacted</span>' :
+          ${c.declined ? '<span class="kind hot">declined</span>' : c.contacted ? '<span class="kind lane-agent">contacted</span>' :
             (ME.role==="admin" && c.phone ? `<button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick='startOutreach(${JSON.stringify(JSON.stringify({job_id:j.id,city:j.gap_city,name:c.name,phone:c.phone,brokerage:c.brokerage}))})'>💬 Text them</button>` : '<span class="meta">no phone</span>')}
-        </div>`).join("")}</div></div>`).join("")
+        </div>`).join("")}</div></div>`; }).join("")
     : `<div class="empty">No open recruiting jobs.</div>`;
 }
+/* Text everyone left on a job. The send path is still one message per call underneath -- this
+   loops it -- so every gate (mode, allowlist, opted out, already declined) runs per person and
+   one refusal cannot skip the rest. The confirm spells out the real number of real people. */
+window.textAll = async (jobId, city, count) => {
+  if (!confirm("Send Tony's recruiting text to all " + count + " agent" + (count===1?"":"s") + " not yet contacted for " + city + "?\n\nThese are REAL texts to REAL agents. Anyone who already declined or opted out is skipped automatically.")) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"text_all", job_id: jobId, confirm: true }) });
+  if (r.error) { alert("Not sent: " + r.error); return; }
+  const skipped = (r.results||[]).filter(x => x.status !== "sent" && x.status !== "test_skipped");
+  alert("Texted " + r.sent + " agent" + (r.sent===1?"":"s") + " for " + city + "."
+    + (skipped.length ? "\n\nSkipped " + skipped.length + ":\n" + skipped.map(x => "• " + x.name + " — " + String(x.status).replace(/_/g," ")).join("\n") : "")
+    + (r.capped ? "\n\nCapped at 12 per press — press again for the rest." : "")
+    + "\n\nThe AI takes each conversation from here — watch Messages.");
+  viewAgents();
+};
 window.startOutreach = async (json) => {
   const c = JSON.parse(json);
   if (!confirm(`Send Tony's recruiting text to ${c.name} (${fmtPh(c.phone)}) for ${c.city}?\n\nThis is a REAL text to a REAL agent.`)) return;
