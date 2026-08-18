@@ -838,22 +838,55 @@ async function viewOwed() {
     <div class="card"><h2>💵 Pay the showing agents</h2><div class="body" id="payq">Loading…</div></div>`;
   await drawVerifyQueue(); await drawCommitments(); await drawPayQueue();
 }
+/* Grouped by CLIENT (Josh 2026-08-18: "the client name is more prominent and ... all the tasks
+   per client is underneath that client that we owe"). The flat list repeated "owes Maryellen
+   Miller - Kalkaska" on every row, so one person with three open promises read as three
+   unrelated jobs. Now the person is the heading and the work sits under them, which is also how
+   you actually work it: you call Maryellen once and clear three things. Clients are ordered by
+   their most urgent promise, and anything past due pulls the whole card to the top. */
 async function drawCommitments() {
   const d = await lapi("&section=commitments");
   window.__commits = d.commitments || [];
   const el = document.getElementById("commits"); if (!el) return;
   if (!window.__commits.length) { el.innerHTML = '<div class="empty">Nothing outstanding. Every promise is closed.</div>'; return; }
   const now = new Date().toISOString();
-  el.innerHTML = `<div class="meta" style="margin-bottom:8px">${window.__commits.length} open${d.overdue?` · <b style="color:var(--red)">${d.overdue} past due</b>`:""} — the next step is written for each one.</div>`
-    + window.__commits.map((c, i) => `<div class="row" style="border-left:3px solid ${c.due_at&&c.due_at<now?"var(--red)":"var(--line)"};padding-left:10px">
-      <div><b>${esc(c.title)}</b></div>
-      <div class="meta">${esc(c.owner_name||"unassigned")} owes ${esc(c.promised_to||c.lead_name||"a client")}${c.city?" · "+esc(c.city):""} · ${c.due_at&&c.due_at<now?'<b style="color:var(--red)">past due</b>':"due "+et(c.due_at)}</div>
-      ${c.prepared_draft?`<div style="background:#f5f9ff;border:1px solid #e3ecfb;border-radius:10px;padding:9px 11px;margin:6px 0;font-size:13px;white-space:pre-wrap">${esc(c.prepared_draft)}</div>
-        <div class="meta" style="margin-bottom:4px">Ready to ${esc((c.prepared_kind||"send").replace(/_/g," "))}${c.prepared_to?" → "+esc(c.prepared_to):""}</div>`
-        : '<div class="meta" style="margin:6px 0">Preparing the next step…</div>'}
-      <button class="btn ghost" onclick="copyDraft(${i})">Copy</button>
-      <button class="btn ghost" style="margin-left:6px" onclick="commitDone('${c.id}')">Mark done</button>
-      ${c.lead_id?`<a class="btn ghost" style="margin-left:6px;text-decoration:none" href="#/leads" onclick="jumpToLead('${c.lead_id}')">Open lead</a>`:""}
+  const overdue = (c) => c.due_at && c.due_at < now;
+
+  // Group on the person we owe. Fall back through promised_to -> lead_name -> lead_id so two
+  // different spellings of the same client cannot split into two cards.
+  const groups = new Map();
+  window.__commits.forEach((c, i) => {
+    const key = c.lead_id || c.promised_to || c.lead_name || "unknown";
+    if (!groups.has(key)) groups.set(key, { name: c.promised_to || c.lead_name || "a client", city: c.city, lead_id: c.lead_id, items: [] });
+    const g = groups.get(key);
+    if (!g.city && c.city) g.city = c.city;
+    if (!g.lead_id && c.lead_id) g.lead_id = c.lead_id;
+    g.items.push({ ...c, _i: i });
+  });
+  const cards = [...groups.values()].map(g => ({
+    ...g,
+    past: g.items.filter(overdue).length,
+    soonest: g.items.map(x => x.due_at).filter(Boolean).sort()[0] || "9999",
+  })).sort((a, b) => (b.past - a.past) || (a.soonest < b.soonest ? -1 : 1));
+
+  el.innerHTML = `<div class="meta" style="margin-bottom:10px">${window.__commits.length} open across ${cards.length} ${cards.length === 1 ? "person" : "people"}${d.overdue ? ` · <b style="color:var(--red)">${d.overdue} past due</b>` : ""} — the next step is written for each one.</div>`
+    + cards.map(g => `<div style="border:1px solid ${g.past ? "#f3c9c6" : "var(--line)"};border-radius:14px;margin-bottom:14px;overflow:hidden">
+      <div style="display:flex;align-items:center;gap:10px;padding:11px 14px;background:${g.past ? "#fdf3f2" : "#f7f9fc"};border-bottom:1px solid ${g.past ? "#f3c9c6" : "var(--line)"}">
+        <span style="font-size:17px;font-weight:800;letter-spacing:-.01em;color:var(--brand)">${esc(g.name)}</span>
+        ${g.city ? `<span class="meta">${esc(g.city)}</span>` : ""}
+        <span class="kind"${g.past ? ' style="background:#fbe9e8;color:var(--red)"' : ""}>${g.items.length} ${g.items.length === 1 ? "promise" : "promises"}${g.past ? ` · ${g.past} past due` : ""}</span>
+        <span style="flex:1"></span>
+        ${g.lead_id ? `<a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/leads" onclick="jumpToLead('${g.lead_id}')">Open lead</a>` : ""}
+      </div>
+      ${g.items.map(c => `<div style="padding:11px 14px;border-top:1px solid #f0f2f6;border-left:3px solid ${overdue(c) ? "var(--red)" : "transparent"}">
+        <div><b>${esc(c.title)}</b></div>
+        <div class="meta">${esc(c.owner_name || "unassigned")} owes this · ${overdue(c) ? '<b style="color:var(--red)">past due</b>' : "due " + et(c.due_at)}</div>
+        ${c.prepared_draft ? `<div style="background:#f5f9ff;border:1px solid #e3ecfb;border-radius:10px;padding:9px 11px;margin:6px 0;font-size:13px;white-space:pre-wrap">${esc(c.prepared_draft)}</div>
+          <div class="meta" style="margin-bottom:4px">Ready to ${esc((c.prepared_kind || "send").replace(/_/g, " "))}${c.prepared_to ? " → " + esc(c.prepared_to) : ""}</div>`
+          : '<div class="meta" style="margin:6px 0">Preparing the next step…</div>'}
+        <button class="btn ghost" onclick="copyDraft(${c._i})">Copy</button>
+        <button class="btn ghost" style="margin-left:6px" onclick="commitDone('${c.id}')">Mark done</button>
+      </div>`).join("")}
     </div>`).join("");
 }
 window.copyDraft = (i) => {
