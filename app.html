@@ -160,6 +160,7 @@ const MODULES = [
   { id:"feed",      nav:"Live Feed", match: h => h.startsWith("#/feed"),      render: () => viewFeed() },
   { id:"dashboard", nav:"Dashboard", match: h => h.startsWith("#/dashboard"), render: () => viewDashboard() },
   { id:"board",     nav:"Board",     match: h => h.startsWith("#/board"),     render: () => viewBoard() },
+  { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
@@ -570,6 +571,83 @@ window.startOutreach = async (json) => {
 };
 
 /* ---------- MAP ---------- */
+/* ---------- OWED: promises we made, and money we owe (Josh 2026-08-17) ----------
+   Two debts sit on one screen because they rot the same way: a promise nobody kept and a
+   showing agent nobody paid both cost you the next deal. Every commitment arrives with the
+   next step already written — copy it, send it, mark it done. Nothing here sends by itself. */
+async function viewOwed() {
+  V().innerHTML = `<h1>Owed</h1>
+    <div class="sub">What we told people we'd do, and who we owe money to. Both cost the next deal if they sit.</div>
+    <div class="card"><h2>🤝 Promises we made</h2><div class="body" id="commits">Loading…</div></div>
+    <div class="card"><h2>💵 Pay the showing agents</h2><div class="body" id="payq">Loading…</div></div>`;
+  await drawCommitments(); await drawPayQueue();
+}
+async function drawCommitments() {
+  const d = await lapi("&section=commitments");
+  window.__commits = d.commitments || [];
+  const el = document.getElementById("commits"); if (!el) return;
+  if (!window.__commits.length) { el.innerHTML = '<div class="empty">Nothing outstanding. Every promise is closed.</div>'; return; }
+  const now = new Date().toISOString();
+  el.innerHTML = `<div class="meta" style="margin-bottom:8px">${window.__commits.length} open${d.overdue?` · <b style="color:var(--red)">${d.overdue} past due</b>`:""} — the next step is written for each one.</div>`
+    + window.__commits.map((c, i) => `<div class="row" style="border-left:3px solid ${c.due_at&&c.due_at<now?"var(--red)":"var(--line)"};padding-left:10px">
+      <div><b>${esc(c.title)}</b></div>
+      <div class="meta">${esc(c.owner_name||"unassigned")} owes ${esc(c.promised_to||c.lead_name||"a client")}${c.city?" · "+esc(c.city):""} · ${c.due_at&&c.due_at<now?'<b style="color:var(--red)">past due</b>':"due "+et(c.due_at)}</div>
+      ${c.prepared_draft?`<div style="background:#f5f9ff;border:1px solid #e3ecfb;border-radius:10px;padding:9px 11px;margin:6px 0;font-size:13px;white-space:pre-wrap">${esc(c.prepared_draft)}</div>
+        <div class="meta" style="margin-bottom:4px">Ready to ${esc((c.prepared_kind||"send").replace(/_/g," "))}${c.prepared_to?" → "+esc(c.prepared_to):""}</div>`
+        : '<div class="meta" style="margin:6px 0">Preparing the next step…</div>'}
+      <button class="btn ghost" onclick="copyDraft(${i})">Copy</button>
+      <button class="btn ghost" style="margin-left:6px" onclick="commitDone('${c.id}')">Mark done</button>
+      ${c.lead_id?`<a class="btn ghost" style="margin-left:6px;text-decoration:none" href="#/leads" onclick="jumpToLead('${c.lead_id}')">Open lead</a>`:""}
+    </div>`).join("");
+}
+window.copyDraft = (i) => {
+  const c = (window.__commits||[])[i]; if (!c || !c.prepared_draft) return;
+  navigator.clipboard.writeText(c.prepared_draft).then(
+    () => alert("Copied. Paste it into the text or email and send."),
+    () => alert(c.prepared_draft));
+};
+window.commitDone = async (id) => {
+  if (!confirm("Mark this promise as done?")) return;
+  await lapi("", { method:"POST", body: JSON.stringify({ action:"commitment_done", task_id:id, done_by:(ME&&ME.full_name)||"app" }) });
+  drawCommitments();
+};
+async function drawPayQueue() {
+  const d = await lapi("&section=pay_queue");
+  window.__pay = d;
+  const el = document.getElementById("payq"); if (!el) return;
+  const owedRows = (d.owed||[]).filter(r => !r.is_team);
+  if (!owedRows.length) {
+    el.innerHTML = '<div class="empty">Nobody is waiting on money.</div>'
+      + ((d.recently_paid||[]).length ? '<div class="meta" style="margin-top:8px">Recently paid: '
+        + d.recently_paid.slice(0,5).map(r => esc(r.agent||"?")+" $"+Number(r.paid_usd||0).toFixed(0)+" "+esc(r.paid_method||"")).join(" · ") + '</div>' : "");
+    return;
+  }
+  el.innerHTML = owedRows.map((r, i) => `<div class="row">
+      <div><b>${esc(r.agent||"showing agent")}</b> — <b>${Number(r.estimate_usd||0).toFixed(2)}</b>${r.is_estimate?' <span class="kind">estimate</span>':""}
+        <span class="kind ${r.status==="approved"?"lane-agent":""}">${esc(r.status)}</span></div>
+      <div class="meta">${esc(r.memo||r.kind||"")}${r.client?" · client "+esc(r.client):""}${r.property_address?" · "+esc(r.property_address):""}</div>
+      <div class="meta">Wants: <b>${esc(r.prefers_method||"not on file")}</b>${r.pay_to?" → "+esc(r.pay_to):""} · owed ${waitFor(Math.round((r.hours_owed||0)*60))}</div>
+      <div style="margin-top:6px">
+        <input id="pa${i}" placeholder="Amount sent" value="${Number(r.estimate_usd||0).toFixed(2)}" style="width:120px;display:inline-block">
+        <select id="pm${i}" style="padding:9px 10px;border:1px solid var(--line);border-radius:10px;margin-left:6px">
+          ${["venmo","zelle","cashapp","check","direct_deposit","cash","other"].map(m => `<option value="${m}" ${r.prefers_method===m?"selected":""}>${m.replace("_"," ")}</option>`).join("")}
+        </select>
+        <input id="pr${i}" placeholder="Reference / confirmation (optional)" style="width:230px;display:inline-block;margin-left:6px">
+        <button style="margin-left:6px" onclick="logPayment('${r.id}', ${i})">I paid this</button>
+      </div></div>`).join("");
+}
+window.logPayment = async (id, i) => {
+  const amount = Number(document.getElementById("pa"+i).value);
+  const method = document.getElementById("pm"+i).value;
+  const reference = document.getElementById("pr"+i).value;
+  if (!amount || amount <= 0) { alert("How much was actually sent?"); return; }
+  if (!confirm("Log " + amount.toFixed(2) + " sent by " + method + "? This records the payment — it does not send money.")) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"log_payment", payable_id:id, amount, method, reference,
+    paid_by:(ME&&ME.full_name)||"app" }) });
+  if (r.error) { alert("Not logged: " + r.error); return; }
+  drawPayQueue();
+};
 /* ---------- THE COVERAGE BOARD (Josh 2026-08-17) ----------
    The one screen that answers "three tour requests came in today — are all three assigned?"
    Sorted by how long each buyer has been waiting, because that is the number that kills deals.
@@ -712,6 +790,7 @@ async function loadLead(id) {
       <div style="margin-top:10px"><button onclick="openTeamBox()">👥 Send to a team agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
+      ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
     <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
   const m = document.getElementById("msgs"); if (m) m.scrollTop = m.scrollHeight;
