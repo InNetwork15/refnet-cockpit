@@ -626,7 +626,8 @@ async function loadLead(id) {
         ${L.est_purchase_price?" · $"+Number(L.est_purchase_price).toLocaleString():""}${L.zip?" · "+esc(L.zip):""}</div>
       ${(d.recruiting_jobs||[]).length?`<div class="meta" style="margin-top:6px">Recruiting: ${(d.recruiting_jobs||[]).map(j=>`${esc(j.status)} — ${esc(j.property_address||j.gap_city||"")} (${j.candidates} candidates)`).join(" · ")}</div>`:""}
       ${d.land_walk?`<div class="meta" style="margin-top:6px">Walk permission: <b>${esc(d.land_walk.permission_status)}</b>${d.land_walk.listing_agent_name?" · "+esc(d.land_walk.listing_agent_name):""}</div>`:""}
-      <div style="margin-top:10px"><button onclick="openRecruitBox()">🤝 Recruit an agent for this lead</button></div>
+      <div style="margin-top:10px"><button onclick="openTeamBox()">👥 Send to a team agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button></div>
+      <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
     </div>
     <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
@@ -643,6 +644,46 @@ function renderTimelineItem(t) {
     ${t.transcript?`<div style="margin-top:4px"><a href="#" style="font-size:11.5px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';return false">show transcript</a><div style="display:none;font-size:11.5px;white-space:pre-wrap;margin-top:4px">${esc(t.transcript)}</div></div>`:""}
     <span class="meta">${et(t.at)}${t.type?" · "+esc(t.type):""}${t.send_status&&t.send_status!=="sent"?" · "+esc(t.send_status):""}</span></div>`;
 }
+window.closeTeamBox = () => { const b = document.getElementById("teambox"); if (b) b.style.display = "none"; };
+window.openTeamBox = async () => {
+  const box = document.getElementById("teambox");
+  if (!box) return;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = '<div class="meta">Loading the team…</div>';
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"team_agents" }) });
+  const team = r.team || [];
+  const addrs = (window.__lead && window.__lead.addresses) || [];
+  if (!team.length) {
+    box.innerHTML = '<div class="meta">No team agents on file yet. Add one and they will show here.</div>';
+    return;
+  }
+  box.innerHTML = '<div class="meta" style="margin-bottom:6px">One of our own covers it — no outreach, no agreement, and no showing fee accrues.</div>'
+    + '<select id="tagent" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
+    + team.map(function(t){ return '<option value="' + esc(t.id) + '">' + esc(t.full_name) + (t.email ? ' — ' + esc(t.email) : '') + '</option>'; }).join('')
+    + '</select>'
+    + '<select id="taddr" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
+    + addrs.map(function(a){ return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('')
+    + '<option value="__manual__">— type a different address —</option></select>'
+    + '<input id="tmanual" placeholder="Street, City" style="display:' + (addrs.length ? 'none' : 'block') + ';margin-bottom:6px">'
+    + '<input id="ttime" placeholder="When? e.g. Fri, Aug 21st 12:30pm (optional)" style="margin-bottom:8px">'
+    + '<button onclick="submitTeamAssign()">Assign</button>'
+    + '<button class="btn ghost" style="margin-left:6px" onclick="closeTeamBox()">Cancel</button>';
+  const sel = document.getElementById("taddr");
+  if (sel) sel.onchange = function(){ document.getElementById("tmanual").style.display = sel.value === "__manual__" ? "block" : "none"; };
+};
+window.submitTeamAssign = async () => {
+  const sel = document.getElementById("taddr"), manual = document.getElementById("tmanual");
+  const address = (!sel || sel.value === "__manual__") ? (manual && manual.value || "").trim() : sel.value;
+  const agent_id = document.getElementById("tagent").value;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"assign_team_agent", lead_id: window.__lead.lead.id, agent_id,
+    property_address: address, showing_time: (document.getElementById("ttime") || {}).value || null }) });
+  if (r.error) { alert("Not assigned: " + r.error); return; }
+  alert(r.agent + " is now covering it. Any recruiting we had open for this lead is closed.");
+  document.getElementById("teambox").style.display = "none";
+  loadLead(window.__lead.lead.id);
+};
 window.openRecruitBox = () => {
   const d = window.__lead, box = document.getElementById("recruitbox");
   if (!box) return;
