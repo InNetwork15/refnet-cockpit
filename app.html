@@ -615,8 +615,35 @@ async function drawBoard(silent) {
     <div class="ztiles" style="margin-bottom:12px">${stageRow.map(([k,l]) =>
       `<div class="ztile"><span>${l}</span><b>${st[k] ?? 0}</b></div>`).join("")}</div>
     <div class="meta" style="margin-bottom:6px">Human minutes logged: <b>${f.human_minutes_total ?? 0}</b>${f.human_minutes_per_shown?` · ~${f.human_minutes_per_shown} per showing reached`:""}. ${esc(f.minutes_note||"")}</div>
-    <div style="overflow-x:auto"><table><thead><tr><th>ZIP</th><th class="money">Leads</th><th class="money">Needs coverage</th><th class="money">Covered</th><th class="money">Shown</th></tr></thead><tbody>
-      ${(f.by_zip||[]).slice(0,12).map(z => `<tr><td><b>${esc(z.key)}</b></td><td class="money">${z.total}</td>
+    <div id="fzip"></div>`;
+  drawFunnelZip();
+}
+/* Funnel-by-ZIP: city sits next to the ZIP (five digits mean nothing on their own), and every
+   column sorts — click once for the sensible direction, again to reverse. */
+let FZSORT = { key: "needs_coverage", dir: -1 };
+window.sortFZ = (key) => {
+  if (FZSORT.key === key) FZSORT.dir = -FZSORT.dir;
+  else FZSORT = { key, dir: (key === "key" || key === "label") ? 1 : -1 };
+  drawFunnelZip();
+};
+function drawFunnelZip() {
+  const el = document.getElementById("fzip"); if (!el) return;
+  const rows = [...((window.__funnel || {}).by_zip || [])];
+  const { key, dir } = FZSORT;
+  rows.sort((a, b) => {
+    const x = key === "key" ? a.key : key === "label" ? (a.label || "").toLowerCase() : a[key];
+    const y = key === "key" ? b.key : key === "label" ? (b.label || "").toLowerCase() : b[key];
+    const blankX = x === null || x === undefined || x === "", blankY = y === null || y === undefined || y === "";
+    if (blankX || blankY) return blankX && blankY ? 0 : blankX ? 1 : -1;   // blanks sink
+    if (x === y) return b.total - a.total;
+    return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir;
+  });
+  const caret = (k) => FZSORT.key === k ? `<span style="color:var(--blue)">${FZSORT.dir === 1 ? "↑" : "↓"}</span>` : '<span style="opacity:.25">↕</span>';
+  const th = (k, label, cls) => `<th class="zsort ${cls||""} ${FZSORT.key===k?"zactive":""}" onclick="sortFZ('${k}')">${label} ${caret(k)}</th>`;
+  el.innerHTML = `<div style="overflow-x:auto"><table><thead><tr>
+      ${th("key","ZIP")}${th("label","City")}${th("total","Leads","money")}${th("needs_coverage","Needs coverage","money")}${th("covered","Covered","money")}${th("shown","Shown","money")}
+    </tr></thead><tbody>
+      ${rows.map(z => `<tr><td><b>${esc(z.key)}</b></td><td>${esc(z.label||"—")}</td><td class="money">${z.total}</td>
         <td class="money ${z.needs_coverage?"zon":""}">${z.needs_coverage}</td><td class="money">${z.covered}</td><td class="money">${z.shown}</td></tr>`).join("")}
       </tbody></table></div>`;
 }
@@ -776,6 +803,8 @@ window.submitRecruit = async () => {
    instantly — no reload, no second round trip. Hover a bubble to see that ZIP's count. */
 const ZWIN = [["7d","Last 7 days"],["10d","Last 10 days"],["30d","Last 30 days"],["90d","Last 90 days"],["365d","Last year"],["all","All time"]];
 let ZSEL = "30d", ZMAP = null, ZLAYER = null;
+// which business are we looking at — houses and land behave nothing alike
+let ZLANE = "";
 // sort follows the window filter until you click a heading yourself — then it stays put
 let ZSORT = { key: "w:30d", dir: -1, pinned: false };
 const zapi = (qs) => api("?fn=zips" + qs);
@@ -793,12 +822,13 @@ function loadLeaflet() {
 async function viewZips() {
   V().innerHTML = `<h1>Leads by ZIP</h1>
     <div class="sub" id="zsub">Loading lead geography…</div>
+    <div class="zchips" id="zlane"></div>
     <div class="zchips" id="zchips"></div>
     <div id="ztiles" class="ztiles"></div>
     <div class="card"><h2>🗺️ Where the leads are — hover a bubble</h2>
       <div class="body" style="padding:0"><div id="zmap" style="height:440px;border-radius:0 0 16px 16px"></div></div></div>
     <div class="card"><h2>📋 Every ZIP, every window</h2><div class="body" id="ztable">…</div></div>`;
-  const d = await zapi("&section=zip_report");
+  const d = await zapi("&section=zip_report" + (ZLANE ? "&lane=" + ZLANE : ""));
   window.__zips = d;
   document.getElementById("zsub").innerHTML =
     `${d.zip_count} ZIP codes have sent us leads. Counts are by the date the lead came in (Eastern).
@@ -806,6 +836,16 @@ async function viewZips() {
      <span class="meta">Generated ${esc(d.generated_et||"")}</span>`;
   drawZChips(); await drawZMap(); drawZTable();
 }
+function drawZLane() {
+  const el = document.getElementById("zlane"); if (!el) return;
+  el.innerHTML = [["","All leads"],["client","Homes"],["vl","VL — vacant land"]].map(([k,l]) =>
+    `<button class="${ZLANE===k?"on":""}" onclick="setZLane('${k}')">${l}</button>`).join("");
+}
+window.setZLane = async (k) => { ZLANE = k; drawZLane(); await viewZipsReload(); };
+window.viewZipsReload = async () => {
+  const d = await zapi("&section=zip_report" + (ZLANE ? "&lane=" + ZLANE : ""));
+  window.__zips = d; drawZChips(); await drawZMap(); drawZTable();
+};
 function drawZChips() {
   document.getElementById("zchips").innerHTML = ZWIN.map(([k, label]) =>
     `<button class="${ZSEL===k?"on":""}" onclick="setZWin('${k}')">${label}
