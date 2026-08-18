@@ -442,6 +442,7 @@ window.newGroupText = async () => {
    connected mailbox and thread onto the original email. */
 let SELMAIL = null, MAILSIG = "";
 const eapi = (qs, opts) => api("?fn=email" + qs, opts);
+const aiapi = (qs, opts) => api("?fn=emailai" + (qs || ""), opts);   // AI drafts desk
 async function viewEmail() {
   V().innerHTML = `<h1>Email <button class="btn ghost" style="float:right" onclick="composeEmail()">✉️ New email</button></h1>
     <div class="sub" id="emailsub">Loading mailbox…</div>
@@ -503,9 +504,11 @@ async function loadMailThread(t, silent) {
         ${esc((m.body_text || m.snippet || "").slice(0, 4000))}
         ${m.has_attachments?`<div style="font-size:11px;margin-top:4px">📎 ${(m.attachments||[]).map(a=>esc(a.filename)).join(", ")}</div>`:""}
         <span class="meta">${m.direction==="out"?"sent":esc(m.from_email||"")} · ${et(m.occurred_at)}</span></div>`).join("")}</div>
+    <div id="draftbox"></div>
     <div class="comp" style="flex-direction:column;gap:6px">
       <textarea id="ebody" placeholder="Write your reply… (sends from ${esc((window.__mail&&window.__mail.address)||"the connected mailbox")} and threads onto this email)"></textarea>
       <div style="display:flex;gap:8px;align-items:center"><button id="esend">Send reply</button>
+      <button class="btn ghost" id="edraft">✨ Draft with AI</button>
       <span class="meta">Replying to ${esc((newestIn&&newestIn.from_email)||t.email||"")}</span></div>
     </div>`;
   const msgs = document.getElementById("msgs"); msgs.scrollTop = msgs.scrollHeight;
@@ -519,7 +522,82 @@ async function loadMailThread(t, silent) {
     if (r.error) { alert("Not sent: " + r.error + (r.detail?" — "+r.detail:"")); btn.disabled = false; btn.textContent = "Send reply"; return; }
     MAILSIG = ""; loadMailThread(t); refreshMail(true);
   };
+  document.getElementById("edraft").onclick = async () => {
+    const b = document.getElementById("edraft"); b.disabled = true; b.textContent = "Reading the thread…";
+    const r = await aiapi("", { method:"POST", body: JSON.stringify({ action:"draft", thread_id: t.key }) });
+    b.disabled = false; b.textContent = "✨ Draft with AI";
+    if (r.error) { alert("No draft: " + r.error); return; }
+    renderDraft(t, r.draft);
+  };
+  renderDraft(t);
 }
+
+/* ---------- AI EMAIL DRAFTS (Josh 2026-08-18, the INRE pattern) ----------
+   The machine writes, a person sends. There is no path from here to a mailbox that does not
+   go through someone reading it first — Approve & Send calls the same send_email a hand-typed
+   reply calls, and only then marks the draft used.
+
+   Confidence is shown as loudly as the text itself, on purpose. A draft you cannot calibrate
+   is worse than no draft, because it gets rubber-stamped. When the agent refuses to invent a
+   fact — an easement, a fee, a closing date — it says which fact, right above the Send button,
+   where it cannot be missed. */
+async function renderDraft(t, known) {
+  const box = document.getElementById("draftbox"); if (!box) return;
+  let d = known;
+  if (!d) {
+    const r = await aiapi("&section=drafts").catch(() => ({}));
+    d = (r.drafts || []).find(x => x.thread_id === t.key);
+  }
+  if (!d) { box.innerHTML = ""; return; }
+  const C = { high:["#127a3e","Confident — everything asked is answered from what we know"],
+              medium:["#8a6d00","Partly sure — one thing is being deferred"],
+              low:["#b3261e","Not sure — this needs a person before it goes"] }[d.confidence] || ["#5f6e8a", d.confidence];
+  window.__draft = d;
+  box.innerHTML = '<div style="border:1px solid ' + C[0] + '55;background:' + C[0] + '0d;border-radius:12px;padding:12px 14px;margin:10px 14px 0">'
+    + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">'
+      + '<b style="font-size:13px;color:var(--brand)">✨ AI drafted a reply</b>'
+      + '<span style="font-size:11px;font-weight:700;color:' + C[0] + ';border:1px solid ' + C[0] + '55;border-radius:999px;padding:2px 9px">' + esc(d.confidence) + '</span>'
+      + '<span style="flex:1"></span><span class="meta">nothing sends until you click</span></div>'
+    + (d.needs_human ? '<div style="background:#fff3f3;border:1px solid #f0c9c9;border-radius:9px;padding:8px 10px;font-size:12.5px;margin-bottom:8px"><b>It would not guess:</b> ' + esc(d.needs_human) + '</div>' : "")
+    + '<div class="meta" style="margin-bottom:8px">' + esc(d.reasoning || "") + '</div>'
+    + '<div style="display:flex;gap:6px;margin-bottom:6px"><input id="dto" value="' + esc(d.to_email || "") + '" placeholder="To" style="flex:1">'
+      + '<input id="dcc" value="' + esc(d.cc_email || "") + '" placeholder="CC (optional)" style="flex:1"></div>'
+    + '<input id="dsubj" value="' + esc(d.subject || "") + '" placeholder="Subject" style="width:100%;margin-bottom:6px">'
+    + '<textarea id="dbody" style="width:100%;height:150px">' + esc(d.body || "") + '</textarea>'
+    + '<div style="display:flex;gap:8px;align-items:center;margin-top:8px">'
+      + '<button onclick="approveSend()">Approve &amp; Send</button>'
+      + '<button class="btn ghost" onclick="saveDraft()">Save edits</button>'
+      + '<button class="btn ghost" onclick="dismissDraft()">Discard</button></div></div>';
+}
+function draftFields() {
+  return { to: document.getElementById("dto").value.trim(), cc: document.getElementById("dcc").value.trim(),
+           subject: document.getElementById("dsubj").value.trim(), body: document.getElementById("dbody").value.trim() };
+}
+window.saveDraft = async () => {
+  const d = window.__draft; if (!d) return;
+  const f = draftFields();
+  await aiapi("", { method:"POST", body: JSON.stringify({ action:"save_draft", draft_id: d.id, ...f }) });
+  alert("Saved. It will be here when you come back.");
+};
+window.dismissDraft = async () => {
+  const d = window.__draft; if (!d) return;
+  if (!confirm("Discard this draft? Nothing was sent.")) return;
+  await aiapi("", { method:"POST", body: JSON.stringify({ action:"dismiss_draft", draft_id: d.id }) });
+  document.getElementById("draftbox").innerHTML = "";
+};
+window.approveSend = async () => {
+  const d = window.__draft; if (!d) return;
+  const f = draftFields();
+  if (!f.to || !f.body) { alert("It needs a recipient and a body."); return; }
+  if (d.confidence === "low" && !confirm("The AI marked this LOW confidence" + (d.needs_human ? " because it would not guess: " + d.needs_human : "") + ".\n\nSend it anyway?")) return;
+  if (!confirm("Send this email to " + f.to + "?\n\nThis is a REAL email to a REAL person.")) return;
+  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"send_email", to: f.to, cc: f.cc || undefined,
+    subject: f.subject, body: f.body, thread_id: d.thread_id, reply_to_email_id: d.email_id }) });
+  if (r.error) { alert("Not sent: " + r.error + (r.detail ? " — " + r.detail : "")); return; }
+  await aiapi("", { method:"POST", body: JSON.stringify({ action:"mark_sent", draft_id: d.id, sent_by: (ME && ME.full_name) || "app" }) });
+  document.getElementById("draftbox").innerHTML = "";
+  MAILSIG = ""; if (SELMAIL) loadMailThread(SELMAIL); refreshMail(true);
+};
 window.composeEmail = async () => {
   if (!window.__mail || !window.__mail.connected) { alert("Connect Gmail first."); return; }
   const to = prompt("Send to (email address):"); if (!to) return;
