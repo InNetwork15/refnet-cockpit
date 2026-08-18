@@ -266,12 +266,17 @@ window.openBots = function (which) {
     const sp = d.spend || {}, LAB = {"refnet-intent":"Reading new inquiries (intent)","refnet-recruiter":"Recruiting research","refnet-reader":"Client reply drafts","refnet-agent-convo":"Agent conversations","refnet-call-summary":"Call summaries","refnet-daily-brief":"Tony's daily brief","refnet-commitment-prep":"Preparing promised next steps","refnet-feedback":"Showing feedback","refnet-email-draft":"Email reply drafts","refnet-vl":"Vacant-land desk"};
     const usd = (n) => "$" + Number(n || 0).toFixed(2);
     const fmtN = (n) => Number(n || 0).toLocaleString();
-    const pct = Number(sp.pct_of_budget || 0);
-    const budgetColor = pct >= 100 ? "var(--red)" : pct >= 80 ? "#8a6d00" : "var(--green)";
+    // Josh 2026-08-18: "No Ceiling but a $10.00 in a day is a good amber alert number. but just
+    // a day." So TODAY leads and sets the colour; the monthly figures stay as context. The old
+    // budget bar went red at 100% of a monthly number, which reads as a cap this system does not
+    // have and would have alarmed near the end of every month by arithmetic alone.
+    const DAY_AMBER = 10;
+    const today = Number(sp.cost_today || 0);
+    const budgetColor = today > DAY_AMBER ? "#8a6d00" : "var(--green)";
     const cards = [
+      [usd(sp.cost_today), "Today", today > DAY_AMBER ? "color:#8a6d00" : ""],
       [usd(sp.cost_mtd), "Spent month-to-date", ""],
       [usd(sp.projected_month), "Projected full month", "color:var(--blue)"],
-      [usd(sp.cost_today), "Today", ""],
       [fmtN(sp.total_tokens), fmtN(sp.calls) + " model calls", ""],
     ].map(c => '<div style="flex:1;min-width:120px"><div style="font-size:22px;font-weight:800;color:var(--brand);' + c[2] + '">' + c[0] + '</div><div class="meta" style="font-size:11px">' + c[1] + '</div></div>').join("");
     const rows = (sp.breakdown || []).map(b =>
@@ -282,7 +287,7 @@ window.openBots = function (which) {
       + '</td><td style="padding:6px 10px;text-align:right;color:var(--blue)">' + usd(b.projected) + '</td></tr>').join("");
     body = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">' + cards + "</div>"
       + '<div style="background:' + budgetColor + '12;border:1px solid ' + budgetColor + '44;border-radius:10px;padding:8px 11px;font-size:12.5px;margin-bottom:10px">'
-        + "On pace for <b>" + usd(sp.projected_month) + "</b> against a <b>" + usd(sp.budget_usd) + "</b> monthly budget — <b style=\"color:" + budgetColor + "\">" + pct.toFixed(0) + "%</b>.</div>"
+        + "Today <b style=\"color:" + budgetColor + "\">" + usd(today) + "</b>" + (today > DAY_AMBER ? " — over the $" + DAY_AMBER + "/day amber line" : " — under the $" + DAY_AMBER + "/day amber line") + ". Month to date " + usd(sp.cost_mtd) + ", on pace for " + usd(sp.projected_month) + ". <span class=\"meta\">There is no spending cap — these are lights, not brakes.</span></div>"
       + ((sp.breakdown || []).length
         ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
           + '<thead><tr style="color:var(--muted);font-size:10.5px;letter-spacing:.03em">'
@@ -365,22 +370,10 @@ async function drawHomeCards() {
      <div class="meta">${et(a.created_at)} · <a href="#" onclick="resolveAlert('${a.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
     + (d.alerts.length>12?`<div class="meta" style="padding-top:8px">+ ${d.alerts.length-12} more</div>`:"") : `<div class="empty">All clear.</div>`) + `</div></div>`;
   // Pay queue lives on Owed now — one place to pay someone, with amount and method recorded.
-  // Deal economics. Commission appears ONLY once an offer is recorded (Josh 2026-08-18) — before
-  // that the honest columns are the list price and what the showings have already cost us. A dash
-  // in GCI means "no offer", not "not calculated yet", and the basis column says so in words.
-  hh += `<div class="card"><h2>💰 Deal economics</h2><div class="body">` + (d.economics?.length ?
-    `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">List price</th><th>Basis</th><th class="money">GCI</th><th class="money">Net to us</th><th></th></tr>` +
-    d.economics.map(e => `<tr><td><span class="whoName">${esc(e.client)}</span>${e.partner?`<div class="meta">via ${esc(e.partner)}</div>`:""}</td>
-      <td>${e.badges.title?'<span class="badge b-title">TITLE</span>':""}${e.badges.mortgage?'<span class="badge b-mortgage">MORTGAGE</span>':""}${e.badges.insurance?'<span class="badge b-insurance">INSURANCE</span>':""}${e.badges.listing?'<span class="badge b-listing">LISTING</span>':""}</td>
-      <td><span class="kind">${esc(e.status)}</span></td>
-      <td class="money">${$(e.est_purchase_price)}</td>
-      <td class="meta">${e.offered?`<b style="color:var(--green)">${esc(e.basis)}</b>`:esc(e.basis)}${e.committed_cost?`<div class="meta">${$(e.committed_cost)} in showing fees committed</div>`:""}</td>
-      <td class="money">${e.offered?$(e.gci):"—"}</td>
-      <td class="money net">${e.offered?$(e.projected_net):"—"}</td>
-      <td>${e.offered
-        ? `<button class="btn ghost" style="padding:4px 9px;font-size:11px" onclick="withdrawOffer('${e.placement_id}')">Withdraw</button>`
-        : `<button style="padding:4px 9px;font-size:11px" onclick="recordOffer('${e.placement_id}','${esc(e.client)}')">Record offer</button>`}</td></tr>`).join("") + `</table></div>
-    <div class="meta" style="margin-top:8px">${d.financials_config.buyer_commission_pct}% GCI · $${d.financials_config.broker_fee_flat} broker fee. Commission is computed off the amount we offered, not the list price — and nothing is projected until an offer is recorded.</div>` : `<div class="empty">No deals in motion with a price set.</div>`) + `</div></div>`;
+  // Deal economics used to live here. Josh 2026-08-18: "Remove the Deal Economics
+  // entirely from HOME. I'll build that out somewhere else." The SERVER side stays intact --
+  // cockpit still returns `economics` with the offer gate applied, and record_offer /
+  // withdraw_offer still work -- so the new surface only has to render it.
   // Partner scorecard lives on Agents now, next to the agreements and payout methods it needs.
   document.getElementById("d").innerHTML = hh;
 }
