@@ -261,17 +261,41 @@ window.openBots = function (which) {
         + "<br>" + a.runs_24h + " runs/24h" + (a.fails_24h ? ' · <b style="color:var(--red)">' + a.fails_24h + " failed</b>" : "") + "</div></div>";
     }).join("");
   } else if (which === "ai") {
-    const ai = d.ai;
-    body = '<div class="meta" style="margin-bottom:10px"><b>$' + ai.cost_est.toFixed(2) + "</b> across <b>" + ai.calls
-      + "</b> model calls in 24h · " + (ai.input_tokens/1000).toFixed(0) + "k in / " + (ai.output_tokens/1000).toFixed(0) + "k out."
-      + "<br>Estimated at $" + ai.rates.input_per_mtok + "/M in and $" + ai.rates.output_per_mtok + "/M out. "
-      + "<b>This is an estimate</b> — the Anthropic console is the authority on the bill.</div>";
-    body += '<table style="width:100%"><tr><th style="text-align:left">What the AI did</th><th>Calls</th><th class="money">Est. cost</th></tr>'
-      + (ai.by_kind || []).map(function (k) {
-        return "<tr><td>" + esc(String(k.kind).replace(/^refnet-/, "").replace(/-/g, " ")) + "</td><td>" + k.calls
-          + '</td><td class="money">$' + k.cost.toFixed(3) + "</td></tr>";
-      }).join("") + "</table>";
-    if (!(ai.by_kind || []).length) body += '<div class="empty">No model calls in the last 24 hours.</div>';
+    // Mirrors the INRE AI-spend panel: four cards, a per-function table, a Total row, and a
+    // footnote that says how the projection was computed and what it does NOT include.
+    const sp = d.spend || {}, LAB = {"refnet-intent":"Reading new inquiries (intent)","refnet-recruiter":"Recruiting research","refnet-reader":"Client reply drafts","refnet-agent-convo":"Agent conversations","refnet-call-summary":"Call summaries","refnet-daily-brief":"Tony's daily brief","refnet-commitment-prep":"Preparing promised next steps","refnet-feedback":"Showing feedback","refnet-email-draft":"Email reply drafts","refnet-vl":"Vacant-land desk"};
+    const usd = (n) => "$" + Number(n || 0).toFixed(2);
+    const fmtN = (n) => Number(n || 0).toLocaleString();
+    const pct = Number(sp.pct_of_budget || 0);
+    const budgetColor = pct >= 100 ? "var(--red)" : pct >= 80 ? "#8a6d00" : "var(--green)";
+    const cards = [
+      [usd(sp.cost_mtd), "Spent month-to-date", ""],
+      [usd(sp.projected_month), "Projected full month", "color:var(--blue)"],
+      [usd(sp.cost_today), "Today", ""],
+      [fmtN(sp.total_tokens), fmtN(sp.calls) + " model calls", ""],
+    ].map(c => '<div style="flex:1;min-width:120px"><div style="font-size:22px;font-weight:800;color:var(--brand);' + c[2] + '">' + c[0] + '</div><div class="meta" style="font-size:11px">' + c[1] + '</div></div>').join("");
+    const rows = (sp.breakdown || []).map(b =>
+      '<tr><td style="padding:6px 10px">' + esc(LAB[b.kind] || String(b.kind).replace(/^refnet-/, "").replace(/-/g, " "))
+      + '</td><td style="padding:6px 10px;text-align:right;color:var(--muted)">' + fmtN(b.calls)
+      + '</td><td style="padding:6px 10px;text-align:right;color:var(--muted)">' + fmtN(b.tokens)
+      + '</td><td style="padding:6px 10px;text-align:right;font-weight:600">' + usd(b.cost_mtd)
+      + '</td><td style="padding:6px 10px;text-align:right;color:var(--blue)">' + usd(b.projected) + '</td></tr>').join("");
+    body = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">' + cards + "</div>"
+      + '<div style="background:' + budgetColor + '12;border:1px solid ' + budgetColor + '44;border-radius:10px;padding:8px 11px;font-size:12.5px;margin-bottom:10px">'
+        + "On pace for <b>" + usd(sp.projected_month) + "</b> against a <b>" + usd(sp.budget_usd) + "</b> monthly budget — <b style=\"color:" + budgetColor + "\">" + pct.toFixed(0) + "%</b>.</div>"
+      + ((sp.breakdown || []).length
+        ? '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'
+          + '<thead><tr style="color:var(--muted);font-size:10.5px;letter-spacing:.03em">'
+          + '<th style="padding:6px 10px;text-align:left">WHAT THE AI DID</th><th style="padding:6px 10px;text-align:right">CALLS</th>'
+          + '<th style="padding:6px 10px;text-align:right">TOKENS</th><th style="padding:6px 10px;text-align:right">COST MTD</th>'
+          + '<th style="padding:6px 10px;text-align:right">PROJ. MONTH</th></tr></thead><tbody>' + rows
+          + '<tr style="border-top:2px solid #e2e8f4;font-weight:700"><td style="padding:8px 10px">Total (API)</td><td></td><td></td>'
+          + '<td style="padding:8px 10px;text-align:right">' + usd(sp.cost_mtd) + '</td>'
+          + '<td style="padding:8px 10px;text-align:right;color:var(--blue)">' + usd(sp.projected_month) + '</td></tr></tbody></table></div>'
+        : '<div class="empty">No model calls this month.</div>')
+      + '<div class="meta" style="margin-top:10px;font-size:11px">Projection = last-' + (sp.pace_days || 7) + '-day pace x ' + (sp.days_in_month || 30) + ' days.'
+        + " Cost is computed from token counts at published Anthropic rates, so treat it as an estimate — the Anthropic console is the authority on the bill."
+        + " Whisper transcription (OpenAI) and the RingCentral/Gmail APIs are billed separately and are NOT in these figures.</div>";
   } else if (which === "texts") {
     const t = d.texts;
     body = '<div class="meta">' + t["in"] + " texts in, " + t.out + " texts out, " + t.calls + " calls in the last 24 hours."
@@ -341,15 +365,44 @@ async function drawHomeCards() {
      <div class="meta">${et(a.created_at)} · <a href="#" onclick="resolveAlert('${a.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
     + (d.alerts.length>12?`<div class="meta" style="padding-top:8px">+ ${d.alerts.length-12} more</div>`:"") : `<div class="empty">All clear.</div>`) + `</div></div>`;
   // Pay queue lives on Owed now — one place to pay someone, with amount and method recorded.
-  hh += `<div class="card"><h2>💰 Deal economics (projected)</h2><div class="body">` + (d.economics?.length ?
-    `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">Price</th><th class="money">GCI</th><th class="money">Net to us</th></tr>` +
+  // Deal economics. Commission appears ONLY once an offer is recorded (Josh 2026-08-18) — before
+  // that the honest columns are the list price and what the showings have already cost us. A dash
+  // in GCI means "no offer", not "not calculated yet", and the basis column says so in words.
+  hh += `<div class="card"><h2>💰 Deal economics</h2><div class="body">` + (d.economics?.length ?
+    `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">List price</th><th>Basis</th><th class="money">GCI</th><th class="money">Net to us</th><th></th></tr>` +
     d.economics.map(e => `<tr><td><span class="whoName">${esc(e.client)}</span>${e.partner?`<div class="meta">via ${esc(e.partner)}</div>`:""}</td>
       <td>${e.badges.title?'<span class="badge b-title">TITLE</span>':""}${e.badges.mortgage?'<span class="badge b-mortgage">MORTGAGE</span>':""}${e.badges.insurance?'<span class="badge b-insurance">INSURANCE</span>':""}${e.badges.listing?'<span class="badge b-listing">LISTING</span>':""}</td>
-      <td><span class="kind">${esc(e.status)}</span></td><td class="money">${$(e.est_purchase_price)}</td><td class="money">${$(e.gci)}</td><td class="money net">${$(e.projected_net)}</td></tr>`).join("") + `</table></div>
-    <div class="meta" style="margin-top:8px">Assumptions: ${d.financials_config.buyer_commission_pct}% GCI · $${d.financials_config.broker_fee_flat} broker fee (placeholders until Josh's real numbers).</div>` : `<div class="empty">No deals in motion with a price set.</div>`) + `</div></div>`;
+      <td><span class="kind">${esc(e.status)}</span></td>
+      <td class="money">${$(e.est_purchase_price)}</td>
+      <td class="meta">${e.offered?`<b style="color:var(--green)">${esc(e.basis)}</b>`:esc(e.basis)}${e.committed_cost?`<div class="meta">${$(e.committed_cost)} in showing fees committed</div>`:""}</td>
+      <td class="money">${e.offered?$(e.gci):"—"}</td>
+      <td class="money net">${e.offered?$(e.projected_net):"—"}</td>
+      <td>${e.offered
+        ? `<button class="btn ghost" style="padding:4px 9px;font-size:11px" onclick="withdrawOffer('${e.placement_id}')">Withdraw</button>`
+        : `<button style="padding:4px 9px;font-size:11px" onclick="recordOffer('${e.placement_id}','${esc(e.client)}')">Record offer</button>`}</td></tr>`).join("") + `</table></div>
+    <div class="meta" style="margin-top:8px">${d.financials_config.buyer_commission_pct}% GCI · $${d.financials_config.broker_fee_flat} broker fee. Commission is computed off the amount we offered, not the list price — and nothing is projected until an offer is recorded.</div>` : `<div class="empty">No deals in motion with a price set.</div>`) + `</div></div>`;
   // Partner scorecard lives on Agents now, next to the agreements and payout methods it needs.
   document.getElementById("d").innerHTML = hh;
 }
+/* ---------- RECORD AN OFFER (Josh 2026-08-18) ----------
+   The one human act that turns commission projection on. Kept explicit and confirmable: an
+   offer entered by mistake puts money on the board that nobody agreed to. */
+window.recordOffer = async (placementId, client) => {
+  const raw = prompt(`What did we offer for ${client}?\n\nEnter the offer amount in dollars. Commission is computed from this number, not the list price.`);
+  if (raw === null) return;
+  const price = Number(String(raw).replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(price) || price <= 1000) { alert("Enter a real offer amount above $1,000."); return; }
+  if (!confirm(`Record an offer of $${price.toLocaleString("en-US")} for ${client}?\n\nThis starts projecting commission on this deal.`)) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"record_offer", placement_id:placementId, offer_price:price }) });
+  if (r.error) { alert("Not recorded: " + r.error); return; }
+  viewHome();
+};
+window.withdrawOffer = async (placementId) => {
+  if (!confirm("Withdraw this offer?\n\nThe deal stops projecting any commission and goes back to showing fees only.")) return;
+  const r = await api("", { method:"POST", body: JSON.stringify({ action:"withdraw_offer", placement_id:placementId }) });
+  if (r.error) { alert("Not withdrawn: " + r.error); return; }
+  viewHome();
+};
 window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); viewHome(); };
 // approvePayable / markPaid were removed with the Home pay-queue card. They were the OLD way to
 // settle a debt — "mark paid" with no amount and no method — and leaving them reachable meant two
@@ -598,14 +651,51 @@ window.approveSend = async () => {
   document.getElementById("draftbox").innerHTML = "";
   MAILSIG = ""; if (SELMAIL) loadMailThread(SELMAIL); refreshMail(true);
 };
-window.composeEmail = async () => {
+/* ---------- COMPOSE (Josh 2026-08-18: "so we can email clients as well") ----------
+   This used to be three prompt() boxes that made you type a client's address from memory, while
+   FUB had already handed us an email for every single lead. Now you pick the person. Typing a
+   free-form address still works for anyone outside the system, but it is no longer the only way. */
+window.composeEmail = async (presetEmail, presetName) => {
   if (!window.__mail || !window.__mail.connected) { alert("Connect Gmail first."); return; }
-  const to = prompt("Send to (email address):"); if (!to) return;
-  const subject = prompt("Subject:"); if (subject === null) return;
-  const bodyText = prompt("Message:"); if (!bodyText) return;
-  const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"send_email", to, subject, body: bodyText }) });
-  alert(r.error ? ("Not sent: " + r.error + (r.detail?" — "+r.detail:"")) : "Sent ✓");
-  refreshMail(true);
+  let people = [];
+  try { people = (await eapi("&section=email_people")).people || []; } catch { /* picker is a convenience, not a gate */ }
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(20,30,55,.45);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 14px;overflow:auto";
+  ov.innerHTML = `<div class="card" style="max-width:620px;width:100%;margin:0">
+    <h2>✉️ New email</h2>
+    <div class="body">
+      <div class="meta" style="margin-bottom:4px">To</div>
+      <select id="cpick" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;margin-bottom:6px">
+        <option value="">— pick a client or partner —</option>
+        ${people.map(p=>`<option value="${esc(p.email)}" data-n="${esc(p.name)}">${p.kind==="client"?"👤":"🤝"} ${esc(p.name)} — ${esc(p.email)}${p.detail?" · "+esc(p.detail):""}</option>`).join("")}
+      </select>
+      <input id="cto" placeholder="or type an email address" value="${esc(presetEmail||"")}" style="margin-bottom:8px">
+      <input id="csub" placeholder="Subject" style="margin-bottom:8px">
+      <textarea id="cbody" placeholder="Message" style="height:170px;margin-bottom:10px"></textarea>
+      <div style="display:flex;gap:8px;align-items:center">
+        <button id="csend">Send</button>
+        <button class="btn ghost" id="ccancel">Cancel</button>
+        <span class="meta" id="cstat" style="margin-left:auto"></span>
+      </div>
+    </div></div>`;
+  document.body.appendChild(ov);
+  const close = () => ov.remove();
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  document.getElementById("ccancel").onclick = close;
+  // Picking someone fills the address box, so what will actually be sent is always visible.
+  document.getElementById("cpick").onchange = (e) => {
+    if (e.target.value) document.getElementById("cto").value = e.target.value;
+  };
+  document.getElementById("csend").onclick = async () => {
+    const to = document.getElementById("cto").value.trim();
+    const subject = document.getElementById("csub").value.trim();
+    const bodyText = document.getElementById("cbody").value.trim();
+    if (!to || !bodyText) { document.getElementById("cstat").textContent = "Need an address and a message."; return; }
+    const btn = document.getElementById("csend"); btn.disabled = true; btn.textContent = "Sending…";
+    const r = await eapi("", { method:"POST", body: JSON.stringify({ action:"send_email", to, subject, body: bodyText }) });
+    if (r.error) { document.getElementById("cstat").textContent = "Not sent: " + r.error; btn.disabled = false; btn.textContent = "Send"; return; }
+    close(); refreshMail(true);
+  };
 };
 /* Setup card — Google credentials + the one-click connect handshake. */
 window.renderEmailSetup = (st) => {
