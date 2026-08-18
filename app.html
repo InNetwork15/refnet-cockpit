@@ -1110,7 +1110,11 @@ async function loadLead(id) {
         ${L.est_purchase_price?" · $"+Number(L.est_purchase_price).toLocaleString():""}${L.zip?" · "+esc(L.zip):""}</div>
       ${(d.recruiting_jobs||[]).length?`<div class="meta" style="margin-top:6px">Recruiting: ${(d.recruiting_jobs||[]).map(j=>`${esc(j.status)} — ${esc(j.property_address||j.gap_city||"")} (${j.candidates} candidates)`).join(" · ")}</div>`:""}
       ${d.land_walk?`<div class="meta" style="margin-top:6px">Walk permission: <b>${esc(d.land_walk.permission_status)}</b>${d.land_walk.listing_agent_name?" · "+esc(d.land_walk.listing_agent_name):""}</div>`:""}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">👥 Send to a team agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button></div>
+      ${d.coverage ? `<div style="margin-top:10px;background:#e9f9f2;border:1px solid #b9e6d0;border-radius:10px;padding:9px 12px">
+        <b style="color:var(--green)">✅ ${esc(d.coverage.agent)} is covering this${d.coverage.is_team ? " (in-house)" : ""}</b>
+        <div class="meta">${esc(d.coverage.address || L.first_inquiry_address || "")}${d.coverage.phone ? " · " + esc(fmtPh(d.coverage.phone)) : ""} · ${esc(String(d.coverage.status || "").replace(/_/g, " "))}</div></div>`
+        : `<div style="margin-top:10px" class="meta">Nobody is covering this yet.</div>`}
+      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
