@@ -174,7 +174,7 @@ function renderShell() {
   const initials = (ME.full_name||ME.email||"??").trim().split(/\s+/).map(w=>w[0]).slice(0,2).join("").toUpperCase();
   // INRE's shell: nav-first (no brand block), avatar with dropdown (My Profile / Sign out)
   A().innerHTML = `<div class="top">
-    <div class="nav">${MODULES.filter(m=>m.nav).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
+    <div class="nav">${MODULES.filter(m=>m.nav && (!m.admin || ME.role==="admin")).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
     <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
     ${ME.role==="admin" ? `<button id="bigpause" style="margin-right:12px;border-radius:999px;font-weight:800;background:#d23b34;box-shadow:0 1px 2px rgba(210,59,52,.35)">⏸ PAUSE ALL</button>` : ""}
@@ -326,6 +326,8 @@ const V = () => document.getElementById("view");
 function route() {
   const h = location.hash || "#/home";
   const m = MODULES.find(m => m.match(h)) || MODULES[0];
+  // Hiding a tab is presentation, not access control. Someone can type the hash.
+  if (m.admin && ME.role !== "admin") { renderShell(); V().innerHTML = `<div class="card"><div class="body"><div class="empty">That page is for admins.</div></div></div>`; return; }
   clearInterval(window.__msgPoll); window.__msgPoll = null;
   renderShell(); m.render();
 }
@@ -1321,6 +1323,94 @@ function viewMap() {
 }
 
 /* ---------- PROFILE (INRE profile + connections pattern) ---------- */
+/* ---------- USERS (Josh 2026-08-18: "manage users and have them be able to login") ----------
+   The INRE shape: who can get in, what they can do, when they were last here. Two things this
+   page refuses to do — delete anyone (disabling is reversible and answers the same question),
+   and strip the last admin of their role (that locks everyone out with no way back but the
+   Supabase dashboard). Both are enforced server-side too; this UI is the convenience, not the
+   guard. */
+const uapi = (qs, opts) => api("?fn=users" + (qs || ""), opts);
+async function viewUsers() {
+  V().innerHTML = `<h1>Users</h1>
+    <div class="sub">Who can sign in to RefNet, and what they are allowed to do.</div>
+    <div class="card"><h2>➕ Add someone</h2><div class="body">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input id="nu_name" placeholder="Full name" style="flex:1;min-width:150px">
+        <input id="nu_email" placeholder="email@innetworkrealestate.com" style="flex:1;min-width:200px">
+        <select id="nu_role" style="padding:9px 12px;border:1px solid var(--line);border-radius:10px;font:inherit">
+          <option value="agent">Agent — sees the desks</option>
+          <option value="admin">Admin — also manages users and settings</option>
+        </select>
+        <button id="nu_go">Create login</button>
+      </div>
+      <div class="meta" style="margin-top:7px">A one-time password is generated and shown once. Hand it over; they change it after signing in.</div>
+      <div id="nu_out"></div>
+    </div></div>
+    <div class="card"><h2>👥 People</h2><div class="body" id="ulist">Loading…</div></div>`;
+  document.getElementById("nu_go").onclick = createUser;
+  await drawUsers();
+}
+async function drawUsers() {
+  const d = await uapi("");
+  const el = document.getElementById("ulist"); if (!el) return;
+  if (d.error) { el.innerHTML = `<div class="empty">${esc(d.error === "admins_only" ? "That page is for admins." : d.error)}</div>`; return; }
+  const us = d.users || [];
+  el.innerHTML = `<div style="overflow-x:auto"><table>
+    <tr><th>Name</th><th>Email</th><th>Role</th><th>Last signed in</th><th></th></tr>` +
+    us.map(u => `<tr${u.disabled ? ' style="opacity:.5"' : ""}>
+      <td><span class="whoName">${esc(u.full_name || "—")}</span>${u.disabled ? ' <span class="kind">disabled</span>' : ""}${u.auth_missing ? ' <span class="kind hot">cannot log in</span>' : ""}</td>
+      <td class="meta">${esc(u.email)}</td>
+      <td><select data-role="${u.id}" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px">
+        <option value="agent"${u.role === "agent" ? " selected" : ""}>agent</option>
+        <option value="admin"${u.role === "admin" ? " selected" : ""}>admin</option>
+      </select></td>
+      <td class="meta">${u.never_logged_in ? "<i>never</i>" : et(u.last_sign_in_at)}</td>
+      <td style="white-space:nowrap">
+        <button class="btn ghost" style="padding:4px 9px;font-size:11px" data-pw="${u.id}" data-n="${esc(u.full_name || u.email)}">Reset password</button>
+        <button class="btn ghost" style="padding:4px 9px;font-size:11px;margin-left:4px" data-act="${u.id}" data-d="${u.disabled ? 0 : 1}" data-n="${esc(u.full_name || u.email)}">${u.disabled ? "Enable" : "Disable"}</button>
+      </td></tr>`).join("") + `</table></div>`;
+  el.querySelectorAll("[data-role]").forEach(s => s.onchange = async (e) => {
+    const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "set_role", user_id: e.target.dataset.role, role: e.target.value }) });
+    if (r.error) { alert("Not changed: " + r.error); }
+    drawUsers();
+  });
+  el.querySelectorAll("[data-pw]").forEach(b => b.onclick = async () => {
+    if (!confirm(`Reset the password for ${b.dataset.n}? Their current one stops working immediately.`)) return;
+    const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "reset_password", user_id: b.dataset.pw }) });
+    if (r.error) { alert("Not reset: " + r.error); return; }
+    showSecret(`New password for ${b.dataset.n}`, r.temp_password);
+  });
+  el.querySelectorAll("[data-act]").forEach(b => b.onclick = async () => {
+    const dis = b.dataset.d === "1";
+    if (!confirm(dis ? `Disable ${b.dataset.n}? They will not be able to sign in. Nothing they did is deleted, and you can enable them again any time.` : `Let ${b.dataset.n} sign in again?`)) return;
+    const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "set_active", user_id: b.dataset.act, disable: dis }) });
+    if (r.error) { alert("Not changed: " + r.error); return; }
+    drawUsers();
+  });
+}
+async function createUser() {
+  const name = document.getElementById("nu_name").value.trim();
+  const email = document.getElementById("nu_email").value.trim();
+  const role = document.getElementById("nu_role").value;
+  if (!email.includes("@")) { alert("A real email address is required."); return; }
+  const btn = document.getElementById("nu_go"); btn.disabled = true; btn.textContent = "Creating…";
+  const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "create_user", email, full_name: name, role }) });
+  btn.disabled = false; btn.textContent = "Create login";
+  if (r.error) { alert("Not created: " + r.error); return; }
+  document.getElementById("nu_name").value = ""; document.getElementById("nu_email").value = "";
+  showSecret(`Login created for ${name || email}`, r.temp_password, email);
+  drawUsers();
+}
+/* Shown once, on screen, and never persisted anywhere the app can read back. */
+function showSecret(title, pw, email) {
+  const out = document.getElementById("nu_out");
+  const html = `<div style="margin-top:10px;background:#e9f9f2;border:1px solid #b9e6d0;border-radius:10px;padding:11px 13px">
+    <div style="font-weight:700;color:var(--green)">${esc(title)}</div>
+    ${email ? `<div class="meta">Sign in at this same address with <b>${esc(email)}</b></div>` : ""}
+    <div style="margin-top:6px">One-time password: <b style="font-family:ui-monospace,Menlo,monospace;font-size:15px">${esc(pw)}</b></div>
+    <div class="meta" style="margin-top:4px">Write this down now — it is not stored and cannot be shown again. Use “Reset password” if it is lost.</div></div>`;
+  if (out) out.innerHTML = html; else alert(title + "\n\nOne-time password: " + pw);
+}
 async function viewProfile() {
   V().innerHTML = `<h1>My Profile</h1><div class="sub">Account + connected integrations</div>
     <div class="card"><h2>Identity</h2><div class="body">
