@@ -1163,7 +1163,8 @@ async function refreshLeads() {
       ${l.do_not_contact?`<span class="kind hot">opted out</span>`:""}
       <div style="margin:3px 0 1px"><span class="st ${l.intent==="tour_request"?"st-answered":l.intent==="nurture"?"st-waiting":"st-needs"}">${esc(l.intent_label||l.intent||"?")}</span>
         ${l.ever_replied?`<span class="st st-answered">replied</span>`:""}
-        ${l.handled_by?`<span class="st st-waiting">${l.handled_by==="assigned"?"✅ assigned":l.handled_by==="recruiting"?"🤝 recruiting":"🌱 nurturing"}</span>`:""}</div>
+        ${l.handled_by?`<span class="st st-waiting">${l.handled_by==="assigned"?"✅ assigned":l.handled_by==="recruiting"?"🤝 recruiting":"🌱 nurturing"}</span>`:""}
+        ${l.recruiting_stalled?`<span class="st st-needs" title="A recruiting job exists but nobody has been texted yet — this is still your move">🤝 job open, nobody texted</span>`:""}</div>
       <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
       <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
     </div>`).join("") || (LQUEUE
