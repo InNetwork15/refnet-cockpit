@@ -394,13 +394,13 @@ window.nurtureLead = async (leadId) => {
     action:"set_nurture", lead_id: leadId, note, check_in_days: days, by: (ME && ME.full_name) || "app" }) });
   if (r.error) { alert("Not saved: " + r.error); return; }
   alert("Moved to nurture. Any recruiting for them is closed, and a task will bring them back in " + days + " days.");
-  loadLead(leadId);
+  afterLeadAction(leadId);
 };
 window.endNurture = async (leadId) => {
   if (!confirm("Put this lead back into the active pipeline?")) return;
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"end_nurture", lead_id: leadId }) });
   if (r.error) { alert("Not changed: " + r.error); return; }
-  loadLead(leadId);
+  afterLeadAction(leadId);
 };
 /* ---------- RECORD AN OFFER (Josh 2026-08-18) ----------
    The one human act that turns commission projection on. Kept explicit and confirmable: an
@@ -1120,7 +1120,11 @@ window.jumpToLead = (id) => {
    The lead file: who they are, every text/call/email in one stream, the call summaries the
    transcriber wrote, and WHY the machine called them a tour request vs a question vs nurture.
    Plus the button that opens recruiting for a chosen property address. */
-let LSEL = null, LFILTER = "";
+// LQUEUE on = show only leads still waiting on a decision (Josh 2026-08-18: "I need this to be a
+// queue that clears out when we take one of the action button steps"). Default ON, because the
+// list's job is the work you have not done. "All" is still one click away.
+let LSEL = null, LFILTER = "", LQUEUE = true;
+
 const lapi = (qs, opts) => api("?fn=leads" + qs, opts);
 const LANE_LABEL = { vl: "VL — vacant land", client: "client" };
 async function viewLeads() {
@@ -1133,28 +1137,50 @@ async function viewLeads() {
 }
 function drawLChips() {
   const opts = [["","All"],["client","Homes"],["vl","VL — vacant land"]];
-  document.getElementById("lchips").innerHTML = opts.map(([k,l]) =>
-    `<button class="${LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
+  const n = (window.__leadsAll||[]).filter(x=>x.needs_decision).length;
+  document.getElementById("lchips").innerHTML =
+    `<button class="${LQUEUE?"on":""}" onclick="toggleQueue()" title="Only leads that want a tour and have nobody on them yet">🎯 Needs a decision${n?` <b>${n}</b>`:""}</button>`
+    + opts.map(([k,l]) =>
+    `<button class="${!LQUEUE&&LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
     + `<input id="lq" placeholder="Search name, city, address, ZIP…" style="width:260px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
         onkeydown="if(event.key==='Enter')refreshLeads()">`;
 }
-window.setLFilter = (k) => { LFILTER = k; drawLChips(); refreshLeads(); };
+window.setLFilter = (k) => { LFILTER = k; LQUEUE = false; drawLChips(); refreshLeads(); };
+window.toggleQueue = () => { LQUEUE = !LQUEUE; drawLChips(); refreshLeads(); };
+
 async function refreshLeads() {
   const q = (document.getElementById("lq")?.value || "").trim();
   const d = await lapi("&section=lead_list" + (LFILTER?"&lane="+LFILTER:"") + (q?"&q="+encodeURIComponent(q):""));
-  window.__leads = d.leads || [];
+  window.__leadsAll = d.leads || [];
+  // The queue view hides what has been handled. The full list stays behind "All" -- handled
+  // leads are not deleted, just not your move any more.
+  window.__leads = LQUEUE ? window.__leadsAll.filter(l => l.needs_decision) : window.__leadsAll;
+  drawLChips();
   const el = document.getElementById("leadlist"); if (!el) return;
   el.innerHTML = window.__leads.map((l, i) => `<div class="convrow ${LSEL&&LSEL.id===l.id?"sel":""}" onclick="openLeadIdx(${i})">
       <span class="whoName">${esc(l.name)}</span>
       ${l.lane==="vl"?`<span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>`:""}
       ${l.do_not_contact?`<span class="kind hot">opted out</span>`:""}
       <div style="margin:3px 0 1px"><span class="st ${l.intent==="tour_request"?"st-answered":l.intent==="nurture"?"st-waiting":"st-needs"}">${esc(l.intent_label||l.intent||"?")}</span>
-        ${l.ever_replied?`<span class="st st-answered">replied</span>`:""}</div>
+        ${l.ever_replied?`<span class="st st-answered">replied</span>`:""}
+        ${l.handled_by?`<span class="st st-waiting">${l.handled_by==="assigned"?"✅ assigned":l.handled_by==="recruiting"?"🤝 recruiting":"🌱 nurturing"}</span>`:""}</div>
       <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
       <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
-    </div>`).join("") || `<div class="empty" style="padding:14px">No leads match.</div>`;
+    </div>`).join("") || (LQUEUE
+      ? `<div class="empty" style="padding:14px">🎉 Queue is clear — every lead that wants a tour has an agent, a recruiter, or a reason. <a onclick="toggleQueue()" style="color:var(--blue);cursor:pointer">See all leads</a></div>`
+      : `<div class="empty" style="padding:14px">No leads match.</div>`);
 }
 window.openLeadIdx = (i) => { const l = (window.__leads||[])[i]; if (!l) return; LSEL = l; refreshLeads(); loadLead(l.id); };
+/* After assign / recruit / nurture the lead is no longer your move, so it leaves the queue and
+   the next one opens. Without this the row stayed put and you had to remember what you had just
+   done -- which is the whole reason a queue beats a list. */
+window.afterLeadAction = async (leadId) => {
+  const wasQueue = LQUEUE;
+  await refreshLeads();
+  const next = (window.__leads || []).filter(l => l.id !== leadId)[0];
+  if (wasQueue && next) { LSEL = next; refreshLeads(); loadLead(next.id); }
+  else loadLead(leadId);
+};
 async function loadLead(id) {
   const d = await lapi("&section=lead&id=" + encodeURIComponent(id));
   window.__lead = d;
@@ -1238,7 +1264,7 @@ window.submitTeamAssign = async () => {
   if (r.error) { alert("Not assigned: " + r.error); return; }
   alert(r.agent + " is now covering it. Any recruiting we had open for this lead is closed.");
   document.getElementById("teambox").style.display = "none";
-  loadLead(window.__lead.lead.id);
+  afterLeadAction(window.__lead.lead.id);
 };
 window.openRecruitBox = () => {
   const d = window.__lead, box = document.getElementById("recruitbox");
@@ -1267,7 +1293,7 @@ window.submitRecruit = async () => {
   if (r.error) { alert("Not started: " + r.error); return; }
   alert(r.existing ? "Recruiting is already open for that address." : "Recruiting opened for " + address + ". The recruiter will research candidates, then you tap Send per agent on the Agents page.");
   document.getElementById("recruitbox").style.display = "none";
-  loadLead(window.__lead.lead.id);
+  afterLeadAction(window.__lead.lead.id);
 };
 
 /* ---------- LEADS BY ZIP (Josh 2026-08-17) ----------
