@@ -450,20 +450,37 @@ function stateChip(c) {
 }
 window.__mNeedsOnly = false;
 window.setMFilter = (v) => { window.__mNeedsOnly = v; refreshConvs(true); };
+/* Which LINE carried the conversation, not who the person is (Josh 2026-08-18: "I need to see all
+   of Tony texts and all of TJ texts separately"). Two numbers run this business -- Tony's client
+   line and TJ's recruiting line -- and they were stacked in one list, so a recruiting negotiation
+   sat between two buyer threads. lane is already stamped from the line that carried the messages,
+   which is the only trustworthy source: Brandi is a partner agent but her thread ran on Tony's
+   CLIENT line, and going by contact type would have filed her under TJ. */
+window.setMLane = (v) => { window.__mLane = v; refreshConvs(true); };
 async function refreshConvs(silent) {
   const d = await api("?section=conversations");
   const el = document.getElementById("convlist"); if (!el) return;
   window.__convs = d.conversations || [];
-  const need = window.__convs.filter(c => c.reply_state === "needs_reply").length;
-  const rows = window.__convs.map((c, i) => ({ c, i })).filter(x => !window.__mNeedsOnly || x.c.reply_state === "needs_reply");
-  el.innerHTML = `<div class="mfilter">
-      <button class="${window.__mNeedsOnly?"":"on"}" onclick="setMFilter(false)">All (${window.__convs.length})</button>
-      <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(true)">Needs reply (${need})</button></div>`
+  const lane = window.__mLane || "";
+  const onLane = window.__convs.filter(c => !lane || c.lane === lane);
+  // counts are per line, so "Needs reply" means "on the line you are looking at"
+  const nAll = window.__convs.length;
+  const nTony = window.__convs.filter(c => c.lane === "client").length;
+  const nTJ = window.__convs.filter(c => c.lane === "agent").length;
+  const need = onLane.filter(c => c.reply_state === "needs_reply").length;
+  const rows = window.__convs.map((c, i) => ({ c, i }))
+    .filter(x => (!lane || x.c.lane === lane) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
+  el.innerHTML = `<div class="mfilter" style="flex-wrap:wrap">
+      <button class="${!lane?"on":""}" onclick="setMLane('')">All (${nAll})</button>
+      <button class="${lane==="client"?"on":""}" onclick="setMLane('client')" title="Tony's client line — buyers">📱 Tony (${nTony})</button>
+      <button class="${lane==="agent"?"on":""}" onclick="setMLane('agent')" title="TJ's recruiting line — showing agents">🤝 TJ (${nTJ})</button>
+      <span style="flex:1"></span>
+      <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(!window.__mNeedsOnly)">● Needs reply (${need})</button></div>`
     + (rows.map(({c, i}) => `<div class="convrow ${c.reply_state==="needs_reply"?"needs":""} ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
     <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting":"client"}</span>
     <div style="margin:3px 0 1px">${stateChip(c)}</div>
     <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("")
-    || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply — all caught up. 🎉":"No conversations yet."}</div>`);
+    || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply here — all caught up. 🎉":(lane?"No conversations on this line yet.":"No conversations yet.")}</div>`);
 }
 window.openConvIdx = (i) => { const c = (window.__convs||[])[i]; if (!c) return; SELCONV = c; THREADSIG = ""; refreshConvs(true); loadThread(c); };
 async function loadThread(c, silent) {
