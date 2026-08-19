@@ -1,181 +1,22 @@
 <!doctype html>
-<html>
-<head>
 <meta charset="utf-8">
-<title>INRE — RefNet Cockpit</title>
+<title>RefNet</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-:root{
-  --bg:#f4f6f9;--card:#fff;--line:#e8ebf1;--ink:#16202e;--muted:#667488;
-  --blue:#2f6fed;--brand:#15294a;--accent:#0fb5a6;--green:#15936a;--amber:#b8770a;--purple:#7c3aed;--red:#d23b34;
-  --shadow:0 1px 2px rgba(16,32,64,.05),0 2px 8px rgba(16,32,64,.05);
-  --shadow-lg:0 10px 30px rgba(16,32,64,.12);
-}
-*{box-sizing:border-box}
-body{margin:0;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink);font-size:14px;-webkit-font-smoothing:antialiased}
-.top{background:rgba(255,255,255,.92);backdrop-filter:saturate(180%) blur(8px);display:flex;align-items:center;gap:16px;padding:0 22px;height:60px;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:50}
-.brand{font-weight:800;font-size:16px;letter-spacing:-.01em;color:var(--brand)}
-.brand span{color:var(--blue)}
-.spacer{flex:1}
-.stamp{font-size:12px;color:var(--muted)}
-.viewpill{font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:#fdf1dc;color:var(--amber);display:none}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;padding:18px 22px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
-.card h2{font-size:14px;margin:0;padding:14px 18px;border-bottom:1px solid #eef0f4;font-weight:700;display:flex;align-items:center;gap:8px;color:var(--brand)}
-.card .body{padding:8px 18px 14px}
-.row{padding:9px 0;border-top:1px solid #f0f2f6}
-.row:first-child{border-top:none}
-.who{font-weight:600;color:var(--brand)}
-.meta{color:var(--muted);font-size:12px}
-a{color:var(--blue);text-decoration:none}
-.msg{background:#f5f7fb;border-radius:10px;padding:8px 11px;margin:6px 0;font-size:13px}
-.draft{background:#e9f9f2}
-button{background:var(--blue);color:#fff;border:none;border-radius:10px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;box-shadow:0 1px 2px rgba(47,111,237,.28);transition:filter .14s}
-button:hover{filter:brightness(1.06)}
-.kind{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:#eef1f6;color:#52617a;margin-right:6px}
-.kind.hot{background:#fbe9e8;color:var(--red)}
-.badge{display:inline-block;border-radius:20px;padding:2px 9px;font-size:11px;font-weight:600;margin:1px 4px 1px 0}
-.b-title{background:#e3ecfb;color:#1a56b0}.b-mortgage{background:#e6f5ef;color:var(--green)}
-.b-insurance{background:#fdf1dc;color:var(--amber)}.b-listing{background:#f1e9fb;color:var(--purple)}
-.empty{color:var(--muted);font-style:italic;padding:10px 0}
-table{width:100%;border-collapse:collapse}
-th,td{text-align:left;padding:10px 8px;font-size:13px;border-bottom:1px solid #f0f2f6;vertical-align:middle}
-th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;font-weight:700;background:#fbfcfe}
-.money{font-variant-numeric:tabular-nums;text-align:right}
-th.money{text-align:right}
-.net{font-weight:700;color:var(--green)}
-</style>
-</head>
-<body>
-<div class="top">
-  <div class="brand">In Network <span>RefNet</span></div>
-  <span class="kind">Cockpit</span>
-  <a href="map.html" style="font-size:13px;font-weight:600">Coverage Map</a>
-  <div class="spacer"></div>
-  <span class="viewpill" id="viewpill">VIEW-ONLY</span>
-  <span class="stamp" id="stamp">loading…</span>
-</div>
-<div class="grid">
-  <div class="card"><h2>✍️ Drafts awaiting your tap</h2><div class="body" id="drafts"></div></div>
-  <div class="card"><h2>🚨 Open alerts</h2><div class="body" id="alerts"></div></div>
-  <div class="card"><h2>🤝 Placements in motion</h2><div class="body" id="placements"></div></div>
-  <div class="card"><h2>🔍 Recruiting queues</h2><div class="body" id="recruiting"></div></div>
-  <div class="card"><h2>🏆 Partner scorecard</h2><div class="body" id="scorecard"></div></div>
-  <div class="card"><h2>⏭️ Scheduled follow-ups</h2><div class="body" id="queued"></div></div>
-  <div class="card" style="grid-column:1/-1"><h2>💵 Pay queue — what we owe showing partners</h2><div class="body" id="payables"></div></div>
-  <div class="card" style="grid-column:1/-1"><h2>💰 Deal economics (projected)</h2><div class="body"><div id="economics"></div><div class="meta" id="econ-assumptions" style="margin-top:8px"></div></div></div>
-  <div class="card" style="grid-column:1/-1"><h2>💬 Recent activity</h2><div class="body" id="recent"></div></div>
-</div>
+<!--
+  ONE FRONT DOOR (Josh 2026-08-19: "we have two different URLs going somehow and one doesnt show
+  all the tabs on the top and the other does").
+
+  index.html used to BE the old Aug 5 cockpit -- no login, no nav, driven by a token in the URL
+  hash. So the bare address and app.html were two different applications wearing the same domain,
+  and whichever one you had bookmarked decided which product you got.
+
+  The bare address now goes to the real app. The old cockpit is NOT deleted: it is still served at
+  cockpit.html, and if someone arrives here holding a share token in the hash we send them THERE
+  rather than to a login screen they cannot pass. A link handed out weeks ago keeps working.
+-->
 <script>
-const API = "https://bvatwpiygebcgdctgltv.supabase.co/functions/v1/refnet-cockpit";
-const token = location.hash.slice(1) || new URLSearchParams(location.search).get("token") || localStorage.getItem("refnet_token") || "";
-if (location.hash.slice(1)) localStorage.setItem("refnet_token", location.hash.slice(1));
-const et = (s) => s ? new Date(s).toLocaleString("en-US", { timeZone: "America/Detroit", month:"short", day:"numeric", hour:"numeric", minute:"2-digit" }) : "";
-const esc = (s) => (s ?? "").toString().replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-
-async function act(body) {
-  const r = await fetch(API + "?token=" + encodeURIComponent(token), { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) });
-  const j = await r.json(); load(); return j;
-}
-window.sendDraft = (id) => act({ action:"send_draft", comm_id:id });
-window.resolveAlert = (id) => act({ action:"resolve_alert", alert_id:id });
-window.approvePayable = (id, isEst) => {
-  let actual = null;
-  if (isEst) {
-    const v = prompt("This amount is an ESTIMATE. Enter the ACTUAL amount to approve (or leave blank to approve the estimate):");
-    if (v === null) return;
-    if (v.trim() !== "") actual = Number(v);
-  }
-  return act({ action:"approve_payable", payable_id:id, actual_usd: actual });
-};
-window.markPaid = (id) => { if (confirm("Mark this as PAID? (Record-keeping only — the actual payment happens through the broker/QBO.)")) act({ action:"mark_paid", payable_id:id }); };
-
-async function load() {
-  try {
-    const r = await fetch(API + "?token=" + encodeURIComponent(token));
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const d = await r.json();
-    document.getElementById("stamp").textContent = "as of " + d.generated_et + " ET";
-    document.getElementById("viewpill").style.display = d.viewer ? "inline-block" : "none";
-
-    document.getElementById("drafts").innerHTML = d.drafts.length ? d.drafts.map(c => {
-      const l = c.refnet_leads || {};
-      return `<div class="row"><span class="who">${esc(l.first_name)} ${esc(l.last_name)}</span> <span class="meta">${et(c.occurred_at)}</span>
-        <div class="msg">"${esc(c.body)}"</div>
-        <div class="msg draft">↩ ${esc(c.ai_extraction?.read?.draft_reply)}</div>
-        ${d.viewer ? "" : `<button onclick="sendDraft('${c.id}')">Send reply</button>`}</div>`;
-    }).join("") : `<div class="empty">Inbox zero — no drafts waiting.</div>`;
-
-    document.getElementById("alerts").innerHTML = d.alerts.length ? d.alerts.map(a =>
-      `<div class="row"><span class="kind ${a.kind.includes('hot') ? 'hot' : ''}">${esc(a.kind)}</span>${esc(a.message)}
-       <div class="meta">${et(a.created_at)}${d.viewer ? "" : ` · <a href="#" onclick="resolveAlert('${a.id}');return false">resolve</a>`}</div></div>`
-    ).join("") : `<div class="empty">All clear.</div>`;
-
-    document.getElementById("placements").innerHTML = d.placements.length ? d.placements.map(p =>
-      `<div class="row"><span class="who">${esc(p.refnet_leads?.first_name)} ${esc(p.refnet_leads?.last_name)}</span>
-       ↔ ${esc(p.refnet_partner_agents?.full_name)} <span class="kind">${esc(p.status)}</span>
-       <span class="meta">${et(p.status_changed_at)}</span></div>`
-    ).join("") : `<div class="empty">No placements in motion.</div>`;
-
-    document.getElementById("recruiting").innerHTML = d.recruiting.length ? d.recruiting.map(rj =>
-      `<div class="row"><span class="who">${esc(rj.gap_city)}</span> <span class="kind">${esc(rj.status)}</span>
-       ${rj.candidates} candidates <span class="meta">${et(rj.created_at)}</span></div>`
-    ).join("") : `<div class="empty">No coverage gaps open.</div>`;
-
-    document.getElementById("scorecard").innerHTML = d.scorecard.length ?
-      `<table><tr><th>Partner</th><th>Shown</th><th>Great</th><th>No-shows</th><th>Est. fees</th></tr>` +
-      d.scorecard.map(s => `<tr><td>${esc(s.full_name)}</td><td>${s.showings_verified}/${s.showings_total}</td>
-        <td>${s.great_showings}</td><td>${s.no_shows}</td><td>$${(+s.est_fees_earned_usd).toFixed(0)}</td></tr>`).join("") + `</table>`
-      : `<div class="empty">No partners yet.</div>`;
-
-    document.getElementById("queued").innerHTML = d.queued.length ? d.queued.map(q =>
-      `<div class="row"><span class="kind">${esc(q.kind)}</span>${esc(q.refnet_leads?.first_name ?? "")}
-       <span class="meta">due ${et(q.due_at)}</span></div>`
-    ).join("") : `<div class="empty">Nothing scheduled.</div>`;
-
-    const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
-    document.getElementById("payables").innerHTML = d.payables?.length ?
-      `<div style="overflow-x:auto"><table><tr><th>Partner</th><th>Client</th><th>For</th><th class="money">Amount</th><th>Status</th><th>${d.viewer ? "" : "Action"}</th></tr>` +
-      d.payables.map(p => {
-        const cl = p.refnet_placements?.refnet_leads;
-        const amt = p.status === "paid" ? p.paid_usd : p.estimate_usd;
-        return `<tr>
-        <td><span class="who">${esc(p.refnet_partner_agents?.full_name ?? "?")}</span>${p.refnet_partner_agents?.payout_method ? `<div class="meta">pays via ${esc(p.refnet_partner_agents.payout_method.replace("_", " "))}${p.refnet_partner_agents.payout_details ? " · " + esc(p.refnet_partner_agents.payout_details.slice(0, 40)) : ""}</div>` : `<div class="meta">payout method not on file</div>`}</td>
-        <td>${esc(cl ? (cl.first_name + " " + (cl.last_name ?? "")) : "")}</td>
-        <td>${esc(p.memo ?? p.kind)}</td>
-        <td class="money">${$(amt)}${p.is_estimate && p.status !== "paid" ? '<div class="meta">estimate</div>' : ""}</td>
-        <td><span class="kind${p.status === "pending_approval" ? " hot" : ""}">${esc(p.status.replace("_", " "))}</span>${p.paid_at ? `<div class="meta">paid ${et(p.paid_at)}</div>` : p.approved_at ? `<div class="meta">approved ${et(p.approved_at)}</div>` : ""}</td>
-        <td>${d.viewer ? "" : p.status === "pending_approval" ? `<button onclick="approvePayable('${p.id}', ${!!p.is_estimate})">Approve</button>` : p.status === "approved" ? `<button onclick="markPaid('${p.id}')">Mark paid</button>` : ""}</td></tr>`;
-      }).join("") + `</table></div><div class="meta" style="margin-top:8px">Fees accrue automatically when a showing is verified; commission shares when a deal closes. Approval and payment are always human decisions — nothing here moves money.</div>`
-      : `<div class="empty">Nothing owed — showings and closings accrue here automatically.</div>`;
-    document.getElementById("economics").innerHTML = d.economics?.length ?
-      `<div style="overflow-x:auto"><table><tr><th>Client</th><th>Partners</th><th>Status</th><th class="money">Price</th><th class="money">GCI</th><th class="money">Broker fee</th><th class="money">Showings</th><th class="money">Showing fees</th><th class="money">Agent comm. owed</th><th class="money">Net to INRE</th></tr>` +
-      d.economics.map(e => `<tr>
-        <td><span class="who">${esc(e.client)}</span>${e.partner ? `<div class="meta">via ${esc(e.partner)}</div>` : ""}</td>
-        <td>${e.badges.title ? '<span class="badge b-title">TITLE</span>' : ""}${e.badges.mortgage ? '<span class="badge b-mortgage">MORTGAGE</span>' : ""}${e.badges.insurance ? '<span class="badge b-insurance">INSURANCE</span>' : ""}${e.badges.listing ? '<span class="badge b-listing">LISTING THEIR SALE</span>' : ""}</td>
-        <td><span class="kind">${esc(e.status)}</span></td>
-        <td class="money">${$(e.est_purchase_price)}</td>
-        <td class="money">${$(e.gci)}</td>
-        <td class="money">${$(e.broker_fee)}</td>
-        <td class="money">${e.showings_count} × ${$(e.fee_per_showing)}</td>
-        <td class="money">${$(e.showing_fees)}</td>
-        <td class="money">${$(e.agent_commission_owed)}${e.agent_commission_owed != null ? `<div class="meta">${e.showing_commission_pct}% of GCI</div>` : ""}</td>
-        <td class="money net">${$(e.projected_net)}</td></tr>`).join("") + `</table></div>`
-      : `<div class="empty">No deals in motion with a price set.</div>`;
-    if (d.financials_config) document.getElementById("econ-assumptions").textContent =
-      `Assumptions: ${d.financials_config.buyer_commission_pct}% buyer-side GCI · $${d.financials_config.broker_fee_flat} broker fee · defaults $${d.financials_config.default_fee_per_showing}/showing + ${d.financials_config.default_showing_commission_pct}% unless the signed agreement says otherwise. Prices are estimates until under contract.`;
-
-    document.getElementById("recent").innerHTML = d.recent.map(c =>
-      `<div class="row"><span class="kind">${c.direction === "in" ? "⬅" : "➡"} ${esc(c.channel)}${c.ai_extraction?.type ? " · " + esc(c.ai_extraction.type) : ""}</span>
-       ${esc((c.body ?? "").slice(0, 110))} <span class="meta">${et(c.occurred_at)}</span></div>`
-    ).join("");
-  } catch (e) {
-    document.getElementById("stamp").textContent = "load failed: " + e.message + " (token in URL hash?)";
-  }
-}
-load();
-setInterval(load, 60000);
+  var h = location.hash || "";
+  // a hash on this page only ever meant "here is a cockpit share token"
+  location.replace(h.length > 1 ? ("cockpit.html" + h) : "app.html");
 </script>
-</body>
-</html>
+<p style="font:15px system-ui;margin:40px">Taking you to RefNet… <a href="app.html">continue</a></p>
