@@ -1226,7 +1226,7 @@ async function refreshLeads() {
       ${l.do_not_contact?`<span class="kind hot">opted out</span>`:""}
       <div style="margin:3px 0 1px"><span class="st ${l.intent==="tour_request"?"st-answered":l.intent==="nurture"?"st-waiting":"st-needs"}">${esc(l.intent_label||l.intent||"?")}</span>
         ${l.ever_replied?`<span class="st st-answered">replied</span>`:""}
-        ${l.handled_by?`<span class="st st-waiting">${l.handled_by==="assigned"?"✅ assigned":l.handled_by==="recruiting"?"🤝 recruiting":"🌱 nurturing"}</span>`:""}
+        ${l.handled_by?`<span class="st st-waiting">${l.handled_by==="assigned"?"✅ assigned":l.handled_by==="recruiting"?"🤝 recruiting":l.handled_by==="referred"?"🤝 referred out":"🌱 nurturing"}</span>`:""}
         ${l.recruiting_stalled?`<span class="st st-needs" title="A recruiting job exists but nobody has been texted yet — this is still your move">🤝 job open, nobody texted</span>`:""}</div>
       <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
       <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
@@ -1271,7 +1271,12 @@ async function loadLead(id) {
         <b style="color:var(--purple)">🌱 Nurturing — not ready yet</b>
         <div class="meta">${d.nurture.note ? esc(d.nurture.note) + " · " : ""}set by ${esc(d.nurture.by || "someone")} ${et(d.nurture.since)}${d.nurture.check_at ? " · checking back " + et(d.nurture.check_at) : ""}</div>
         <button class="btn ghost" style="margin-top:6px;padding:4px 10px;font-size:11.5px" onclick="endNurture('${L.id}')">Back to active</button></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🤝 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
+      ${d.referred ? `<div style="margin-top:10px;background:#eef4ff;border:1px solid #cfe0fb;border-radius:10px;padding:9px 12px">
+        <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
+        <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
+        <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
+      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
+      <div id="referbox" style="display:none;margin-top:10px"></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
@@ -1291,6 +1296,44 @@ function renderTimelineItem(t) {
     <span class="meta">${et(t.at)}${t.type?" · "+esc(t.type):""}${t.send_status&&t.send_status!=="sent"?" · "+esc(t.send_status):""}</span></div>`;
 }
 window.closeTeamBox = () => { const b = document.getElementById("teambox"); if (b) b.style.display = "none"; };
+/* REFER THE CLIENT (Josh 2026-08-20: "i want to select Jeffrey Salas and send to John Stanley").
+   A different act from assigning a showing, so it gets its own control and its own list. Sending
+   a showing keeps the client and rents a door-opener for $50; referring gives the client away and
+   earns a fee on the other agent's side. Conflating them would put a $50 payable behind a deal
+   where nobody is owed $50. */
+window.openReferBox = async () => {
+  const box = document.getElementById("referbox"); if (!box) return;
+  if (box.style.display === "block") { box.style.display = "none"; return; }
+  box.style.display = "block";
+  box.innerHTML = '<div class="meta">Loading partners…</div>';
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"referral_agents" }) });
+  const ags = r.agents || [];
+  if (!ags.length) {
+    box.innerHTML = '<div class="meta">No referral partners on file yet. Add one on the Agents page first.</div>';
+    return;
+  }
+  box.innerHTML = '<div class="meta" style="margin-bottom:6px">We hand the whole client over. No showing fee accrues — we earn a referral fee on their side.</div>'
+    + '<select id="ragent" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
+    + ags.map(function(a){ return '<option value="' + esc(a.id) + '">' + esc(a.full_name)
+        + (a.brokerage_name ? ' — ' + esc(a.brokerage_name) : '')
+        + (a.referral_fee_pct != null ? ' (' + esc(a.referral_fee_pct) + '%)' : ' (fee not set)') + '</option>'; }).join('')
+    + '</select>'
+    + '<input id="rnote" placeholder="Anything they should know? (optional)" style="margin-bottom:8px">'
+    + '<button onclick="submitRefer()">Refer this client</button>'
+    + '<button class="btn ghost" style="margin-left:6px" onclick="document.getElementById(\'referbox\').style.display=\'none\'">Cancel</button>';
+};
+window.submitRefer = async () => {
+  const sel = document.getElementById("ragent");
+  const name = sel.options[sel.selectedIndex].text.split(" — ")[0].split(" (")[0];
+  if (!confirm("Refer " + ((window.__lead && window.__lead.lead && window.__lead.lead.first_name) || "this client") + " to " + name + "?\n\nThey take the relationship from here. Any recruiting we had open for this lead is closed, and no showing fee will accrue.")) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"refer_lead", lead_id: window.__lead.lead.id, agent_id: sel.value,
+    note: (document.getElementById("rnote") || {}).value || null, by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not referred: " + r.error); return; }
+  document.getElementById("referbox").style.display = "none";
+  afterLeadAction(window.__lead.lead.id);
+};
+
 window.openTeamBox = async () => {
   const box = document.getElementById("teambox");
   if (!box) return;
