@@ -1288,7 +1288,7 @@ async function loadLead(id) {
         <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
         <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
         <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
+      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="whoIsFree(${L.lat ?? "null"}, ${L.lng ?? "null"})">🗓️ Who is free?</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
       <div id="referbox" style="display:none;margin-top:10px"></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
@@ -1827,15 +1827,20 @@ async function viewAgentProfile() {
         ${apField("Referral fee (%)", "referral_fee_pct", a.referral_fee_pct)}
         ${apField("Payout method", "payout_method", a.payout_method)}
         ${apField("Payout details", "payout_details", a.payout_details)}
+        ${apField("Home address (for scheduling)", "home_address", a.home_address)}
       </div>
       <div style="margin-top:8px"><div class="meta" style="margin-bottom:3px">Notes</div>
         <textarea id="ap-referral_notes" style="height:60px">${esc(a.referral_notes || "")}</textarea></div>
       <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px">
           <input type="checkbox" id="ap-is_referral_partner" ${a.is_referral_partner ? "checked" : ""}> We refer clients to this agent</label>
+        <span class="meta">${a.has_home_location
+          ? '📍 home located — this agent can be ranked by distance'
+          : (a.home_address ? '⚠ home address saved but did not geocode' : '⚠ no home address — cannot be ranked by distance')}</span>
         <span style="flex:1"></span>
         <span class="meta" id="ap-msg"></span>
-        <button onclick="saveAgent('${a.id}')">Save</button>
+        <button class="btn ghost" onclick="showAgentDay('${a.id}')">📅 See their day</button>
+        <button style="margin-left:6px" onclick="saveAgent('${a.id}')">Save</button>
       </div>
       ${d.agreement ? `<div class="meta" style="margin-top:8px">Agreement: ${d.agreement.signed_at ? `<span class="ok">signed ${et(d.agreement.signed_at)}</span>` : "sent, unsigned"}${d.agreement.url ? ` · <a href="${d.agreement.url}" target="_blank" style="color:var(--blue)">view</a>` : ""}${d.agreement.agreed_terms ? ` · ${esc(d.agreement.agreed_terms)}` : ""}</div>` : ""}
     </div></div>
@@ -1880,6 +1885,67 @@ window.saveAgent = async (id) => {
   if (r.error) { msg.textContent = "Not saved: " + r.error; return; }
   msg.textContent = "Saved ✓";
   viewAgentProfile();
+};
+/* ---------- AN AGENT'S DAY, AND WHO IS FREE (Josh 2026-08-20) ----------
+   "click a button and get a pop up of Anthony Wright's day or Brody Law's day on that specific day
+   we're trying to schedule for."
+
+   Distances are STRAIGHT LINE and the panel says so every time it shows one. Presenting
+   as-the-crow-flies miles as drive time is how somebody books two appointments they cannot
+   physically make. */
+function popup(html) {
+  const ov = document.createElement("div");
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(20,30,55,.45);display:flex;align-items:flex-start;justify-content:center;z-index:9999;padding:40px 14px;overflow:auto";
+  ov.innerHTML = `<div class="card" style="max-width:640px;width:100%;margin:0">${html}</div>`;
+  ov.onclick = (e) => { if (e.target === ov) ov.remove(); };
+  document.body.appendChild(ov);
+  return ov;
+}
+window.showAgentDay = async (agentId, date) => {
+  const day = date || prompt("Which day? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
+  if (!day) return;
+  const d = await lapi("&section=agent_day&agent=" + encodeURIComponent(agentId) + "&date=" + encodeURIComponent(day));
+  if (d.error) { alert(d.error); return; }
+  const s = d.summary || {}, stops = d.stops || [], legs = d.legs || [];
+  const hhmm = (iso) => new Date(iso).toLocaleTimeString("en-US", { timeZone:"America/Detroit", hour:"numeric", minute:"2-digit" });
+  popup(`<h2>📅 ${esc(d.agent.name)} — ${esc(d.date)}</h2><div class="body">
+    <div class="meta" style="margin-bottom:8px">
+      ${stops.length ? `${stops.length} showing${stops.length>1?"s":""} · ${Math.round((s.busy_minutes||0)/60*10)/10}h booked` : "Nothing booked — the whole day is open."}
+      ${d.agent.has_home_location ? "" : ' · <b>no home address on file, so the first hop cannot be measured</b>'}
+    </div>
+    ${stops.map((x,i) => {
+      const leg = legs[i] || {};
+      return `${leg.miles != null || leg.gap_minutes != null ? `<div class="meta" style="padding:4px 0 4px 14px;border-left:2px dotted #dbe1ea">
+          ${leg.from_is_home ? "from home" : "from the last stop"}${leg.miles != null ? ` · ${leg.miles} mi as the crow flies` : ""}${leg.gap_minutes != null ? ` · ${leg.gap_minutes} min gap${leg.tight ? " ⚠ tight" : ""}` : ""}
+        </div>` : ""}
+      <div class="row" style="border-left:3px solid ${leg.tight?"var(--amber)":"var(--blue)"};padding-left:10px">
+        <div><b>${hhmm(x.starts_at)}–${hhmm(x.ends_at)}</b> · <span class="whoName">${esc(x.client)}</span></div>
+        <div class="meta">${esc(x.address||"")}${x.lat==null?' · <b>not on the map</b>':""}</div>
+      </div>`;
+    }).join("") || '<div class="empty">No showings booked this day.</div>'}
+    <div class="meta" style="margin-top:10px">Distances are <b>${esc(d.distance_basis)}</b>.</div>
+    <div style="margin-top:8px"><button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Close</button></div>
+  </div>`);
+};
+/* From a lead: who could take this, on the day we are trying to book. */
+window.whoIsFree = async (lat, lng) => {
+  const day = prompt("Which day are you trying to book? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
+  if (!day) return;
+  const qs = "&section=who_is_free&date=" + encodeURIComponent(day) + ((lat && lng) ? `&lat=${lat}&lng=${lng}` : "");
+  const d = await lapi(qs);
+  if (d.error) { alert(d.error); return; }
+  popup(`<h2>🗓️ Who is free — ${esc(d.date)}</h2><div class="body">
+    ${(d.agents||[]).map(a => `<div class="row">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="whoName">${esc(a.name)}</span>
+        <span class="st ${a.booked?"st-waiting":"st-answered"}">${a.booked ? `${a.booked} booked · ${Math.round(a.busy_minutes/60*10)/10}h` : "wide open"}</span>
+        ${a.miles_from_home != null ? `<span class="kind">${a.miles_from_home} mi away</span>` : `<span class="kind hot">${esc(a.why_unknown||"location unknown")}</span>`}
+        <span style="flex:1"></span>
+        <button class="btn ghost" style="padding:4px 10px;font-size:11.5px" onclick="showAgentDay('${a.id}','${esc(d.date)}')">See their day</button>
+      </div></div>`).join("")}
+    <div class="meta" style="margin-top:10px">Ranked by: ${esc(d.ranked_by)}. Distances are <b>${esc(d.distance_basis)}</b>.</div>
+    <div style="margin-top:8px"><button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Close</button></div>
+  </div>`);
 };
 async function viewProfile() {
 
