@@ -383,7 +383,10 @@ window.withdrawOffer = async (placementId) => {
   if (r.error) { alert("Not withdrawn: " + r.error); return; }
   route();
 };
-window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); drawAlerts(); };
+// resolveAlert removed with the Open Alerts card (Josh 2026-08-19: "on the pipeline review
+// remove the Open Alerts"). Alerts still drive the machine server-side -- payout_due, overdue
+// promises, declines -- they simply have no screen of their own now. Nothing silently swallows
+// them; there is just nowhere in the app that lists them.
 // approvePayable / markPaid were removed with the Home pay-queue card. They were the OLD way to
 // settle a debt — "mark paid" with no amount and no method — and leaving them reachable meant two
 // different records of the same payment could exist. Owed is the one place now, and it insists on
@@ -1025,12 +1028,11 @@ async function viewBoard() {
   V().innerHTML = `<h1>Pipeline</h1>
     <div class="sub">Every lead that wants a tour, and whose hands it is in right now.</div>
     <div id="ptiles" class="ztiles"></div>
-    <div class="card"><h2>🚨 Open alerts</h2><div class="body" id="palerts">Loading…</div></div>
     <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>
     <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>
     <div class="card"><h2>✅ Assigned — is anything happening?</h2><div class="body" id="p3">…</div></div>
     <div class="card"><h2>📅 Showings on the books</h2><div class="body" id="p4">…</div></div>`;
-  await Promise.all([drawBoard(), drawAlerts()]);
+  await drawBoard();
   window.__boardPoll = setInterval(() => {
     if (!location.hash.startsWith("#/board") && location.hash !== "" && location.hash !== "#/") {
       clearInterval(window.__boardPoll); window.__boardPoll = null; return;
@@ -1041,16 +1043,6 @@ async function viewBoard() {
 /* Alerts lived on Home and nowhere else, so deleting Home would have deleted the only place they
    could be seen or resolved. They belong next to the pipeline anyway -- an alert is a thing that
    has gone wrong with the work on this page. */
-async function drawAlerts() {
-  const el = document.getElementById("palerts"); if (!el) return;
-  const d = await api("").catch(() => ({}));
-  const a = d.alerts || [];
-  el.innerHTML = a.length
-    ? a.slice(0, 12).map(x => `<div class="row"><span class="kind ${String(x.kind).includes("hot")?"hot":""}">${esc(x.kind)}</span>${esc(x.message)}
-        <div class="meta">${et(x.created_at)} · <a href="#" onclick="resolveAlert('${x.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
-      + (a.length > 12 ? `<div class="meta" style="padding-top:8px">+ ${a.length - 12} more</div>` : "")
-    : `<div class="empty">All clear.</div>`;
-}
 async function drawBoard(silent) {
   const d = await lapi("&section=pipeline");
   if (!document.getElementById("p1")) return;
