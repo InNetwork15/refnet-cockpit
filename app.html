@@ -167,6 +167,7 @@ const MODULES = [
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
+  { id:"recruiting",nav:"Recruiting",match: h => h.startsWith("#/recruiting"),render: () => viewRecruiting() },
   { id:"zips",      nav:"Leads by ZIP", match: h => h.startsWith("#/zips"),   render: () => viewZips() },
   { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
   // My Profile is reachable from the avatar menu; it does not need a tab of its own too.
@@ -771,9 +772,8 @@ const FEEDLABEL = {
 /* ---------- AGENTS (partners + recruiting bench) ---------- */
 const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent", active:"lane-client", inactive:"hot" };
 async function viewAgents() {
-  V().innerHTML = `<h1>Agents</h1><div class="sub">Your showing partners and the recruiting bench. One tap per candidate — no bulk, ever.</div>
-    <div class="card"><h2>🤝 Showing partners</h2><div class="body" id="partners">Loading…</div></div>
-    <div class="card"><h2>🎯 Recruiting bench</h2><div class="body" id="bench">Loading…</div></div>`;
+  V().innerHTML = `<h1>Agents</h1><div class="sub">The people who actually show houses for us — terms, agreements, and what they are owed.</div>
+    <div class="card"><h2>🤝 Showing partners</h2><div class="body" id="partners">Loading…</div></div>`;
   const d = await api("?section=agents");
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
   document.getElementById("partners").innerHTML = (d.partners||[]).length ?
@@ -787,17 +787,58 @@ async function viewAgents() {
       <td>${p.showings_verified}/${p.showings_total}</td>
       <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
       <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
-    : `<div class="empty">No partners yet — recruit from the bench below.</div>`;
-  document.getElementById("bench").innerHTML = (d.recruiting||[]).length ?
-    d.recruiting.map(j => { const left = j.candidates.filter(c=>!c.contacted && !c.declined && c.phone).length; return `<div class="row"><span class="whoName">${esc(j.gap_city)}</span> <span class="kind">${esc(j.status)}</span> <span class="meta">${j.candidates.length} candidates · opened ${et(j.created_at)}</span>
-      ${(ME.role==="admin" && left) ? `<button style="margin-left:8px;padding:4px 12px;font-size:12px" onclick="textAll('${j.id}','${esc(j.gap_city)}',${left})">📣 Text all ${left} left</button>` : ""}
-      <div style="margin-top:6px">${j.candidates.map((c,i) => `
-        <div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-top:1px dashed #f0f2f6">
-          <div style="flex:1"><span class="whoName">${esc(c.name)}</span><span class="meta"> ${esc(c.brokerage||"")}${c.volume?` · ${esc(String(c.volume))}`:""}${c.units_area?` · ${esc(String(c.units_area))} in area`:""}${c.source?` · ${esc(c.source)}`:""}</span></div>
-          ${c.declined ? '<span class="kind hot">declined</span>' : c.contacted ? '<span class="kind lane-agent">contacted</span>' :
-            (ME.role==="admin" && c.phone ? `<button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick='startOutreach(${JSON.stringify(JSON.stringify({job_id:j.id,city:j.gap_city,name:c.name,phone:c.phone,brokerage:c.brokerage}))})'>💬 Text them</button>` : '<span class="meta">no phone</span>')}
-        </div>`).join("")}</div></div>`; }).join("")
-    : `<div class="empty">No open recruiting jobs.</div>`;
+    : `<div class="empty">No partners yet — recruit someone from the Recruiting page.</div>`;
+}
+/* ---------- RECRUITING (Josh 2026-08-19: "i want recruiting to be its own page") ----------
+   It was a card under Agents. Fine at four candidates, useless at ~490 across 55 towns: every
+   agent in every city rendered at once, so the one town that needed you looked exactly like the
+   fifty that did not.
+   A town is a row now. The counts are the point -- how many found, how many never texted, how
+   many said no -- and the list only opens when you ask. Towns with people left to text sort to
+   the top, because that is the only part of this page that is work. */
+async function viewRecruiting() {
+  V().innerHTML = `<h1>Recruiting</h1>
+    <div class="sub">Showing agents we have found, town by town. Anyone who declined is never offered again.</div>
+    <div id="rtiles" class="ztiles"></div>
+    <div class="card"><h2>🎯 The bench</h2><div class="body" id="bench">Loading…</div></div>`;
+  const d = await api("?section=agents");
+  const jobs = (d.recruiting || []).map(j => {
+    const cands = j.candidates || [];
+    return { ...j, cands,
+      left: cands.filter(c => !c.contacted && !c.declined && c.phone).length,
+      texted: cands.filter(c => c.contacted).length,
+      declined: cands.filter(c => c.declined).length };
+  }).sort((a, b) => (b.left - a.left) || String(a.gap_city).localeCompare(String(b.gap_city)));
+
+  const t = jobs.reduce((a, j) => ({ cities: a.cities + 1, agents: a.agents + j.cands.length,
+      left: a.left + j.left, texted: a.texted + j.texted, declined: a.declined + j.declined }),
+    { cities: 0, agents: 0, left: 0, texted: 0, declined: 0 });
+  document.getElementById("rtiles").innerHTML =
+      `<div class="ztile"><span>Towns</span><b>${t.cities}</b><em>${jobs.filter(j => !j.cands.length).length} with nobody yet</em></div>`
+    + `<div class="ztile"><span>Agents found</span><b>${t.agents}</b><em>across every town</em></div>`
+    + `<div class="ztile"><span>Never texted</span><b style="color:${t.left ? "var(--amber)" : "var(--green)"}">${t.left}</b><em>ready to contact</em></div>`
+    + `<div class="ztile"><span>Contacted</span><b>${t.texted}</b><em>${t.declined} said no</em></div>`;
+
+  document.getElementById("bench").innerHTML = jobs.length ? jobs.map(j => `
+    <details style="border-top:1px solid #f0f2f6;padding:8px 0">
+      <summary style="cursor:pointer;display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+        <span class="whoName" style="font-size:15px">${esc(j.gap_city)}</span>
+        <span class="kind">${j.cands.length} found</span>
+        ${j.left ? `<span class="st st-needs">${j.left} never texted</span>`
+                 : (j.cands.length ? `<span class="st st-answered">all contacted</span>`
+                                   : `<span class="st st-needs">nobody found yet</span>`)}
+        ${j.declined ? `<span class="st st-waiting">${j.declined} declined</span>` : ""}
+        <span style="flex:1"></span>
+        ${(ME.role === "admin" && j.left) ? `<button style="padding:4px 12px;font-size:12px" onclick="event.preventDefault();textAll('${j.id}','${esc(j.gap_city)}',${j.left})">📣 Text all ${j.left}</button>` : ""}
+      </summary>
+      <div style="margin-top:6px">${j.cands.map(c => `
+        <div style="display:flex;align-items:center;gap:8px;padding:5px 0 5px 12px;border-top:1px dashed #f0f2f6">
+          <div style="flex:1"><span class="whoName">${esc(c.name)}</span><span class="meta"> ${esc(c.brokerage || "")}${c.phone ? " · " + esc(fmtPh(c.phone)) : ""}</span>${c.notes ? `<div class="meta">${esc(String(c.notes).slice(0, 110))}</div>` : ""}</div>
+          ${c.declined ? '<span class="kind hot">declined</span>' : c.contacted ? '<span class="kind lane-agent">contacted</span>'
+            : (ME.role === "admin" && c.phone ? `<button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick='startOutreach(${JSON.stringify(JSON.stringify({ job_id: j.id, city: j.gap_city, name: c.name, phone: c.phone, brokerage: c.brokerage }))})'>💬 Text them</button>` : '<span class="meta">no phone</span>')}
+        </div>`).join("") || '<div class="meta" style="padding-left:12px">Nobody found yet — the recruiter checks this town every 15 minutes.</div>'}</div>
+    </details>`).join("")
+    : `<div class="empty">No recruiting under way.</div>`;
 }
 /* Text everyone left on a job. The send path is still one message per call underneath -- this
    loops it -- so every gate (mode, allowlist, opted out, already declined) runs per person and
