@@ -793,15 +793,37 @@ const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent",
 async function viewAgents() {
   V().innerHTML = `<h1>Agents</h1>
     <div class="sub">The agents we have actually done business with. Everyone still being courted is on Recruiting.</div>
+    <div class="card"><h2>👥 Our team</h2><div class="body" id="team">Loading…</div></div>
     <div class="card"><h2>🏠 Showing partners</h2><div class="body" id="partners">Loading…</div></div>
     <div class="card"><h2>🤝 Agents we have referred clients to</h2><div class="body" id="referrals">Loading…</div></div>`;
   const d = await api("?section=agents");
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
   const all = d.partners || [];
 
+  // Our own agents. They were on NEITHER list -- filtered out of showing partners by !is_team and
+  // not referral partners either -- so Anthony, Tony, TJ and Brody were unreachable from this page
+  // and their profiles could not be opened at all. The people we schedule most were the only ones
+  // with no way in.
+  const team = all.filter(p => p.is_team);
   // Earned a place on this page: they showed a house, or they signed terms with us.
   const showing = all.filter(p => !p.is_team && (p.showings_total > 0 || p.terms_agreed_at));
   const referral = all.filter(p => p.is_referral_partner);
+
+  // What is MISSING is the useful column here, because a blank is what stops scheduling working:
+  // no number means we cannot tell them about a booking, no home means we cannot rank them by
+  // distance to a property.
+  document.getElementById("team").innerHTML = team.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Mobile</th><th>Home (for scheduling)</th><th>Showings</th><th></th></tr>`
+      + team.map(p => `<tr>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>
+          <div class="meta">${esc(p.email||"")}</div></td>
+        <td class="meta">${p.cell_phone ? esc(fmtPh(p.cell_phone)) : '<span class="kind hot">no number — cannot be notified</span>'}</td>
+        <td class="meta">${p.home_address ? esc(p.home_address) : '<span class="kind hot">not set — cannot be ranked by distance</span>'}</td>
+        <td>${p.showings_verified}/${p.showings_total}</td>
+        <td style="white-space:nowrap"><a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/agent/${p.id}">Edit</a>
+          <button class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:4px" onclick="showAgentDay('${p.id}')">📅 Day</button></td></tr>`).join("")
+      + `</table></div>`
+    : `<div class="empty">Nobody is marked as in-house yet.</div>`;
 
   document.getElementById("partners").innerHTML = showing.length
     ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>`
