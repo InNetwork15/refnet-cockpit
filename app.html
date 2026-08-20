@@ -170,6 +170,7 @@ const MODULES = [
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
   { id:"recruiting",nav:"Recruiting",match: h => h.startsWith("#/recruiting"),render: () => viewRecruiting() },
+  { id:"agent",     nav:null,        match: h => h.startsWith("#/agent/"),    render: () => viewAgentProfile() },
   // Josh 2026-08-20: "leads by zip and coverage map should be combined into one page." They were
   // two answers to the same question -- where is this business happening -- split across two tabs,
   // so you had to hold one in your head to read the other. One page, one map area, two views of it.
@@ -805,7 +806,7 @@ async function viewAgents() {
   document.getElementById("partners").innerHTML = showing.length
     ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>`
       + showing.map(p => `<tr>
-        <td><span class="whoName">${esc(p.full_name)}</span>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
         <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
         <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
         <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
@@ -817,7 +818,7 @@ async function viewAgents() {
   document.getElementById("referrals").innerHTML = referral.length
     ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Brokerage</th><th>Contact</th><th>Referral fee</th><th>Notes</th></tr>`
       + referral.map(p => `<tr>
-        <td><span class="whoName">${esc(p.full_name)}</span></td>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a></td>
         <td class="meta">${esc(p.brokerage_name||"—")}</td>
         <td class="meta">${p.cell_phone?esc(fmtPh(p.cell_phone)):""}${p.email?(p.cell_phone?" · ":"")+esc(p.email):""}${(!p.cell_phone&&!p.email)?'<span class="kind hot">no contact details</span>':""}</td>
         <td class="meta">${p.referral_fee_pct!=null?esc(p.referral_fee_pct)+"%":'<span class="kind hot">not set</span>'}</td>
@@ -1772,7 +1773,104 @@ window.handOff = async (id) => {
   if (r.error) { alert("Not recorded: " + r.error); return; }
   viewOffers();
 };
+/* ---------- ONE AGENT (Josh 2026-08-20) ----------
+   "click on Chris Vish and go to his profile and then add any additional details information for
+   brokerage contact info referral fee arrangements ... and also see clients we've sent to them and
+   the results of that."
+
+   The two ways we send an agent business are kept apart on purpose. A SHOWING is a door opened for
+   a flat fee and the client stays ours. A REFERRAL hands the client over for a share of their
+   side. Summing them would give a number that means nothing, so the page counts them separately
+   and says which is which.
+
+   Money fields distinguish NOT SET from zero. A 0% referral fee is a decision; a blank one is an
+   unanswered question, and the page will not quietly turn the second into the first. */
+async function viewAgentProfile() {
+  const id = (location.hash.split("/")[2] || "").trim();
+  V().innerHTML = `<div id="ap">Loading…</div>`;
+  const d = await api("?section=agent&id=" + encodeURIComponent(id));
+  if (d.error) { document.getElementById("ap").innerHTML = `<div class="card"><div class="body"><div class="empty">${esc(d.error)}</div></div></div>`; return; }
+  const a = d.agent, c = d.counts || {}, m = d.money || {};
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const notSet = '<span class="kind hot">not set</span>';
+
+  document.getElementById("ap").innerHTML = `
+    <h1>${esc(a.full_name)}</h1>
+    <div class="sub">${esc(a.brokerage_name || "no brokerage on file")}${a.is_team ? " · in-house" : ""}${a.is_referral_partner ? " · referral partner" : ""} · <a href="#/agents" style="color:var(--blue)">back to Agents</a></div>
+    <div class="ztiles">
+      <div class="ztile"><span>Clients referred</span><b>${c.referrals || 0}</b><em>handed over entirely</em></div>
+      <div class="ztile"><span>Showings asked</span><b>${c.showings_asked || 0}</b><em>${c.showings_done || 0} actually happened</em></div>
+      <div class="ztile"><span>Owed</span><b style="color:${m.owed ? "var(--amber)" : "var(--green)"}">${$(m.owed)}</b><em>not yet paid</em></div>
+      <div class="ztile"><span>Paid to date</span><b class="net">${$(m.paid)}</b><em>across all work</em></div>
+    </div>
+
+    <div class="card"><h2>📇 Details &amp; terms</h2><div class="body">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+        ${apField("Name", "full_name", a.full_name)}
+        ${apField("Brokerage", "brokerage_name", a.brokerage_name)}
+        ${apField("Mobile", "cell_phone", a.cell_phone)}
+        ${apField("Email", "email", a.email)}
+        ${apField("Showing fee ($ per showing)", "showing_fee_usd", a.showing_fee_usd)}
+        ${apField("Our commission split (%)", "our_split_pct", a.our_split_pct)}
+        ${apField("Referral fee (%)", "referral_fee_pct", a.referral_fee_pct)}
+        ${apField("Payout method", "payout_method", a.payout_method)}
+        ${apField("Payout details", "payout_details", a.payout_details)}
+      </div>
+      <div style="margin-top:8px"><div class="meta" style="margin-bottom:3px">Notes</div>
+        <textarea id="ap-referral_notes" style="height:60px">${esc(a.referral_notes || "")}</textarea></div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:13px">
+          <input type="checkbox" id="ap-is_referral_partner" ${a.is_referral_partner ? "checked" : ""}> We refer clients to this agent</label>
+        <span style="flex:1"></span>
+        <span class="meta" id="ap-msg"></span>
+        <button onclick="saveAgent('${a.id}')">Save</button>
+      </div>
+      ${d.agreement ? `<div class="meta" style="margin-top:8px">Agreement: ${d.agreement.signed_at ? `<span class="ok">signed ${et(d.agreement.signed_at)}</span>` : "sent, unsigned"}${d.agreement.url ? ` · <a href="${d.agreement.url}" target="_blank" style="color:var(--blue)">view</a>` : ""}${d.agreement.agreed_terms ? ` · ${esc(d.agreement.agreed_terms)}` : ""}</div>` : ""}
+    </div></div>
+
+    <div class="card"><h2>🤝 Clients we referred to them</h2><div class="body">${
+      (d.referrals || []).length ? (d.referrals).map(r => `<div class="row">
+        <div><a href="#/leads" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600">${esc(r.client)}</a>
+          <span class="meta"> · ${esc(r.address || "")}${r.city ? ", " + esc(r.city) : ""}${r.price ? " · " + $(r.price) : ""}</span></div>
+        <div class="meta">handed over ${et(r.at)}${r.note ? " · " + esc(r.note) : ""}${a.referral_fee_pct != null && r.price ? ` · fee at ${esc(a.referral_fee_pct)}% of their side` : " · " + notSet + " referral fee"}</div>
+      </div>`).join("") : `<div class="empty">No clients referred to them yet.</div>`
+    }</div></div>
+
+    <div class="card"><h2>🏠 Showings we asked them to cover</h2><div class="body">${
+      (d.showings || []).length ? (d.showings).map(x => `<div class="row">
+        <div><span class="whoName">${esc(x.client)}</span>
+          <span class="st ${x.verified ? "st-answered" : x.happened ? "st-answered" : "st-waiting"}">${x.verified ? "verified" : x.happened ? "happened" : esc(String(x.status).replace(/_/g, " "))}</span></div>
+        <div class="meta">${esc(x.address || "")} · ${et(x.at)}${x.fee ? " · " + $(x.fee) : ""}</div>
+        ${x.feedback ? `<div class="meta">Feedback: <i>${esc(x.feedback)}</i></div>` : ""}
+      </div>`).join("") : `<div class="empty">We have not asked them to show anything yet.</div>`
+    }</div></div>
+
+    <div class="card"><h2>💵 Money</h2><div class="body">${
+      (m.rows || []).length ? (m.rows).map(p => `<div class="row">
+        <div><b>${$(p.status === "paid" ? p.paid_usd : p.estimate_usd)}</b>
+          <span class="st ${p.status === "paid" ? "st-answered" : "st-needs"}">${esc(p.status)}</span>
+          <span class="meta">${esc(p.kind || "")}</span></div>
+        <div class="meta">${esc(p.memo || "")} · ${et(p.paid_at || p.created_at)}</div>
+      </div>`).join("") : `<div class="empty">Nothing owed or paid yet.</div>`
+    }</div></div>`;
+}
+function apField(label, key, val) {
+  return `<div><div class="meta" style="margin-bottom:3px">${label}</div>
+    <input id="ap-${key}" value="${esc(val == null ? "" : String(val))}" placeholder="not set"></div>`;
+}
+window.saveAgent = async (id) => {
+  const keys = ["full_name","brokerage_name","cell_phone","email","showing_fee_usd","our_split_pct","referral_fee_pct","payout_method","payout_details","referral_notes"];
+  const body = { action: "update_agent", agent_id: id,
+    is_referral_partner: document.getElementById("ap-is_referral_partner").checked };
+  keys.forEach(k => { const el = document.getElementById("ap-" + k); if (el) body[k] = el.value; });
+  const msg = document.getElementById("ap-msg"); msg.textContent = "Saving…";
+  const r = await api("", { method: "POST", body: JSON.stringify(body) });
+  if (r.error) { msg.textContent = "Not saved: " + r.error; return; }
+  msg.textContent = "Saved ✓";
+  viewAgentProfile();
+};
 async function viewProfile() {
+
 
   V().innerHTML = `<h1>My Profile</h1><div class="sub">Account + connected integrations</div>
     <div class="card"><h2>Identity</h2><div class="body">
