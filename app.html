@@ -1197,9 +1197,24 @@ function drawFunnelZip() {
         <td class="money ${z.needs_coverage?"zon":""}">${z.needs_coverage}</td><td class="money">${z.covered}</td><td class="money">${z.shown}</td></tr>`).join("")}
       </tbody></table></div>`;
 }
+/* Open a specific lead from anywhere. It used to look only in window.__leads -- the QUEUE-filtered
+   list -- so any lead that had already been handled could not be opened at all: June Bouvrette is
+   assigned to Tony, therefore not in "needs a decision", therefore the lookup missed and you landed
+   on "Pick a lead." Exactly the leads you most want to open from Showings are the ones that have
+   left the queue. Search the full set, drop the filter if that is what it takes to show the row,
+   and open the lead either way. */
 window.jumpToLead = (id) => {
+  const go = async () => {
+    await refreshLeads();
+    let l = (window.__leadsAll || []).find(x => x.id === id);
+    if (l && LQUEUE && !l.needs_decision) { LQUEUE = false; await refreshLeads(); }
+    if (l) LSEL = l;
+    drawLChips(); refreshLeads();
+    loadLead(id);   // open it whether or not it appears in the current filter
+  };
+  if (location.hash.startsWith("#/leads")) { go(); return; }
   location.hash = "#/leads";
-  setTimeout(async () => { await refreshLeads(); const l = (window.__leads||[]).find(x => x.id === id); if (l) { LSEL = l; refreshLeads(); loadLead(id); } }, 350);
+  setTimeout(go, 300);
 };
 
 /* ---------- LEADS (Josh 2026-08-17) ----------
@@ -1376,31 +1391,98 @@ function renderToured(d) {
     }).join("") : `<div class="meta">Nothing shown yet.</div>`}
   </div>`;
 }
+/* SCHEDULE A DAY OF SHOWINGS (Josh 2026-08-20).
+   Was a chain of six prompt() boxes, one property, and it made you retype an address the system
+   already knew. A buyer does not view one house -- they do an afternoon of them -- so this is one
+   date, a row per property, a time each.
+
+   The address the client actually enquired about is filled in for you; June Bouvrette asked about
+   "1212 & 1310 Vance Rd", which is two properties, so the row is editable and removable rather
+   than assumed correct. Each row books its own showing, and the agent is told once per booking. */
 window.scheduleShowing = async (leadId) => {
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"team_agents" }) });
   const team = r.team || [];
-  if (!team.length) { alert("No team agents on file."); return; }
-  const addr = prompt("Which property? (street, city)", (window.__lead?.lead?.first_inquiry_address || "") + (window.__lead?.lead?.first_inquiry_city ? ", " + window.__lead.lead.first_inquiry_city : ""));
-  if (!addr || !addr.trim()) return;
-  const who = prompt("Which agent?\n\n" + team.map((t,i) => `${i+1}. ${t.full_name}`).join("\n") + "\n\nEnter a number:");
-  if (!who) return;
-  const agent = team[Number(who) - 1];
-  if (!agent) { alert("That was not one of the options."); return; }
-  const date = prompt("Date? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
-  if (!date) return;
-  const time = prompt("Time? (24h, e.g. 14:30)", "14:00");
-  if (!time) return;
-  const mins = Number(prompt("How long, in minutes?", "45")) || 45;
-  const res = await lapi("", { method:"POST", body: JSON.stringify({
-    action:"schedule_showing", lead_id: leadId, partner_agent_id: agent.id,
-    property_address: addr.trim(), scheduled_at: `${date}T${time}:00-04:00`,
-    duration_minutes: mins, by:(ME&&ME.full_name)||"app" }) });
-  if (res.error) { alert("Not booked: " + res.error); return; }
-  alert(`Booked with ${agent.full_name}.\n\n` +
-    (res.agent_notified === "sent" ? "They have been texted." :
-     res.agent_notified === "no_phone" ? "⚠ They have NO phone number on file, so they were not told. Add one on their profile." :
-     `Notification status: ${res.agent_notified}.`));
-  loadLead(leadId);
+  if (!team.length) { alert("No team agents on file. Add one on the Agents page first."); return; }
+  const L = (window.__lead && window.__lead.lead) || {};
+  const cov = (window.__lead && window.__lead.coverage) || null;
+  const guess = [L.first_inquiry_address, L.first_inquiry_city].filter(Boolean).join(", ");
+  const today = new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+
+  const ov = popup(`<h2>📅 Schedule showings</h2><div class="body">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px">
+      <div><div class="meta" style="margin-bottom:3px">Date</div>
+        <input type="date" id="sd-date" value="${today}" style="width:170px"></div>
+      <div style="flex:1;min-width:200px"><div class="meta" style="margin-bottom:3px">Agent</div>
+        <select id="sd-agent" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px">
+          ${team.map(t => `<option value="${esc(t.id)}"${cov && cov.agent === t.full_name ? " selected" : ""}>${esc(t.full_name)}</option>`).join("")}
+        </select></div>
+      <button class="btn ghost" id="sd-who" style="padding:9px 12px">🤖 Who should take this?</button>
+    </div>
+    <div class="meta" style="margin-bottom:4px">Properties — the first is what they enquired about; change it, remove it, or add more.</div>
+    <div id="sd-rows"></div>
+    <button class="btn ghost" id="sd-add" style="padding:5px 11px;font-size:12px;margin-top:6px">+ Add another property</button>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+      <button id="sd-go">Book them</button>
+      <button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Cancel</button>
+      <span class="meta" id="sd-msg" style="margin-left:auto"></span>
+    </div></div>`);
+
+  let seq = 0;
+  const addRow = (addr, time) => {
+    const i = seq++;
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;gap:8px;align-items:center;margin-bottom:6px";
+    row.innerHTML = `<input id="sd-a${i}" placeholder="Street, city" value="${esc(addr||"")}" style="flex:1">
+      <input type="time" id="sd-t${i}" value="${time||""}" style="width:130px">
+      <input id="sd-m${i}" value="45" title="minutes" style="width:64px">
+      <button class="btn ghost" style="padding:6px 10px" title="Remove">✕</button>`;
+    row.querySelector("button").onclick = () => row.remove();
+    document.getElementById("sd-rows").appendChild(row);
+  };
+  addRow(guess, "");
+
+  document.getElementById("sd-add").onclick = () => addRow("", "");
+  document.getElementById("sd-who").onclick = () => {
+    const dt = document.getElementById("sd-date").value;
+    ov.remove(); recommendAgent(leadId, dt);
+  };
+
+  document.getElementById("sd-go").onclick = async () => {
+    const date = document.getElementById("sd-date").value;
+    const agentId = document.getElementById("sd-agent").value;
+    const agentName = document.getElementById("sd-agent").selectedOptions[0].text;
+    const msg = document.getElementById("sd-msg");
+    if (!date) { msg.textContent = "Pick a date."; return; }
+    const rows = [...document.querySelectorAll("#sd-rows > div")].map(el => ({
+      address: el.querySelector("input[id^=sd-a]").value.trim(),
+      time:    el.querySelector("input[id^=sd-t]").value,
+      mins:    Number(el.querySelector("input[id^=sd-m]").value) || 45,
+    })).filter(x => x.address && x.time);
+    if (!rows.length) { msg.textContent = "Each property needs an address and a start time."; return; }
+    // Two showings at the same minute for one agent is refused by the database; catch it here so
+    // the person sees which row is the problem rather than a constraint name.
+    const clash = rows.map(r => r.time).find((t, i, a) => a.indexOf(t) !== i);
+    if (clash) { msg.textContent = `Two properties are both set to ${clash}.`; return; }
+
+    document.getElementById("sd-go").disabled = true;
+    const out = [];
+    for (const row of rows) {
+      const res = await lapi("", { method:"POST", body: JSON.stringify({
+        action:"schedule_showing", lead_id: leadId, partner_agent_id: agentId,
+        property_address: row.address, scheduled_at: `${date}T${row.time}:00-04:00`,
+        duration_minutes: row.mins, by:(ME&&ME.full_name)||"app" }) });
+      out.push({ address: row.address, time: row.time, ok: !res.error, err: res.error, notified: res.agent_notified });
+    }
+    ov.remove();
+    const good = out.filter(o => o.ok), bad = out.filter(o => !o.ok);
+    const told = good.some(o => o.notified === "sent");
+    const noPhone = good.some(o => o.notified === "no_phone");
+    alert(`${good.length} showing${good.length===1?"":"s"} booked with ${agentName}.`
+      + (bad.length ? `\n\nNot booked:\n` + bad.map(b => `• ${b.address} at ${b.time} — ${b.err}`).join("\n") : "")
+      + (noPhone ? `\n\n⚠ ${agentName} has NO phone number on file, so they were not told. Add one on their profile.`
+                 : told ? `\n\n${agentName} has been texted.` : ""));
+    loadLead(leadId);
+  };
 };
 window.logShowing = async (showingId, address) => {
   const outcome = prompt(`How did ${address} go?\n\nloved / liked / maybe / passed / offer_made`);
@@ -2042,8 +2124,8 @@ window.showAgentDay = async (agentId, date) => {
 /* Who should take this one. The numbers are computed server-side and the model only weighs them,
    so the panel shows BOTH: the recommendation in words, and the ranking it came from. If you
    disagree with the sentence you can see the arithmetic underneath it and overrule it. */
-window.recommendAgent = async (leadId) => {
-  const day = prompt("Which day? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
+window.recommendAgent = async (leadId, preset) => {
+  const day = preset || prompt("Which day? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
   if (!day) return;
   const at = prompt("Roughly what time? (24h, e.g. 15:00 — leave blank if flexible)", "") || "";
   const ov = popup('<h2>🤖 Working it out…</h2><div class="body"><div class="meta">Checking each agent against that day.</div></div>');
