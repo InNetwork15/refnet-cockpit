@@ -1359,6 +1359,7 @@ function renderTimelineItem(t) {
    NOTE the honest gap: this captures the data a "find similar homes" search would need. It cannot
    run that search, because there is no listing inventory in this system to search. */
 const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it","st-answered"],
+                  no_show:["🚫 no show","st-needs"], cancelled:["❌ cancelled","st-waiting"],
                   maybe:["🤔 maybe","st-waiting"], passed:["👎 passed","st-needs"],
                   offer_made:["💰 offered","st-answered"] };
 function renderToured(d) {
@@ -1484,22 +1485,97 @@ window.scheduleShowing = async (leadId) => {
     loadLead(leadId);
   };
 };
+/* LOG WHAT HAPPENED (Josh 2026-08-20: "i currently hate it ... too many questions right now").
+   He was right. It was seven sequential prompt() boxes and it asked for beds, baths and square
+   feet -- none of which exist anywhere in this system. FUB's Zillow inquiry carries the address,
+   the price, the tour time and the buying timeline, and nothing about the house itself; a search
+   across every message in the database for "3 bed" or "sq ft" returns zero rows. So the form was
+   demanding data only a human could look up, one pop-up at a time, before it would record the one
+   fact that matters: what happened.
+
+   Now it is one screen. Pick what happened and press Save -- that alone is a complete debrief.
+   Everything else is optional and pre-filled with whatever we actually know.
+
+   No-show and cancelled are first-class, and deliberately do NOT ask what they thought of the
+   house: a buyer who never turned up did not dislike it, and recording that as "passed" would
+   poison the matching data later. */
 window.logShowing = async (showingId, address) => {
-  const outcome = prompt(`How did ${address} go?\n\nloved / liked / maybe / passed / offer_made`);
-  if (outcome === null) return;
-  const disliked = prompt("What did NOT work? (this is the most useful thing you can write — what they rule out predicts the next house better than what they say they want)") || "";
-  const liked = prompt("What DID they like? (optional)") || "";
-  const beds = prompt("Beds? (optional)") || "";
-  const baths = prompt("Baths? (optional)") || "";
-  const sqft = prompt("Square feet? (optional)") || "";
-  const acres = prompt("Lot acres? (optional)") || "";
-  const price = prompt("Asking price? (optional)") || "";
-  const r = await lapi("", { method:"POST", body: JSON.stringify({
-    action:"log_showing", showing_id: showingId, outcome: outcome.trim().toLowerCase(),
-    disliked_points: disliked, liked_points: liked,
-    beds, baths, sqft, lot_acres: acres, list_price: price, by:(ME&&ME.full_name)||"app" }) });
-  if (r.error) { alert("Not logged: " + r.error); return; }
-  loadLead(window.__lead.lead.id);
+  const t = ((window.__lead && window.__lead.toured) || []).find(x => x.id === showingId) || {};
+  const L = (window.__lead && window.__lead.lead) || {};
+  const OPTS = [["loved","💚 Loved it"],["liked","🙂 Liked it"],["maybe","🤔 Maybe"],
+                ["passed","👎 Passed"],["offer_made","💰 Made an offer"],
+                ["no_show","🚫 No show"],["cancelled","❌ Cancelled"]];
+  const val = (v) => v == null ? "" : String(v);
+
+  const ov = popup(`<h2>Log the showing</h2><div class="body">
+    <div class="meta" style="margin-bottom:8px">${esc(address || t.address || "")}${t.at ? " · " + et(t.at) : ""}${t.agent ? " · " + esc(t.agent) : ""}</div>
+
+    <div class="meta" style="margin-bottom:4px"><b>What happened?</b></div>
+    <div id="lg-opts" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${OPTS.map(([k, lbl]) => `<button class="btn ghost lg-o" data-o="${k}"
+        style="padding:7px 12px;font-size:12.5px${t.outcome === k ? ";background:var(--blue);color:#fff;border-color:var(--blue)" : ""}">${lbl}</button>`).join("")}
+    </div>
+
+    <div id="lg-rest">
+      <div class="meta" style="margin-bottom:3px">What did not work? <span style="font-weight:400">— the most useful thing here; what they rule out predicts the next house better than what they ask for</span></div>
+      <textarea id="lg-dis" style="height:52px;margin-bottom:8px">${esc(val(t.disliked))}</textarea>
+      <div class="meta" style="margin-bottom:3px">What did they like?</div>
+      <textarea id="lg-lik" style="height:44px;margin-bottom:10px">${esc(val(t.liked))}</textarea>
+
+      <details>
+        <summary class="meta" style="cursor:pointer;margin-bottom:6px">Details about the house — all optional, none of it comes across from Zillow</summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:6px">
+          <div><div class="meta">Beds</div><input id="lg-beds" value="${esc(val(t.beds))}"></div>
+          <div><div class="meta">Baths</div><input id="lg-baths" value="${esc(val(t.baths))}"></div>
+          <div><div class="meta">Sq ft</div><input id="lg-sqft" value="${esc(val(t.sqft))}"></div>
+          <div><div class="meta">Acres</div><input id="lg-acres" value="${esc(val(t.lot_acres))}"></div>
+          <div><div class="meta">Asking</div><input id="lg-price" value="${esc(val(t.list_price != null ? t.list_price : L.est_purchase_price))}"></div>
+        </div>
+      </details>
+    </div>
+
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+      <button id="lg-save">Save</button>
+      <button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Cancel</button>
+      <span class="meta" id="lg-msg" style="margin-left:auto"></span>
+    </div></div>`);
+
+  let picked = t.outcome || null;
+  const rest = ov.querySelector("#lg-rest");
+  const paint = () => {
+    ov.querySelectorAll(".lg-o").forEach(b => {
+      const on = b.dataset.o === picked;
+      b.style.background = on ? "var(--blue)" : "#fff";
+      b.style.color = on ? "#fff" : "#41506a";
+      b.style.borderColor = on ? "var(--blue)" : "var(--line)";
+    });
+    // it did not happen, so do not ask what they thought of it
+    const didNotHappen = picked === "no_show" || picked === "cancelled";
+    rest.style.display = didNotHappen ? "none" : "";
+  };
+  ov.querySelectorAll(".lg-o").forEach(b => b.onclick = () => { picked = b.dataset.o; paint(); });
+  paint();
+
+  ov.querySelector("#lg-save").onclick = async () => {
+    const msg = ov.querySelector("#lg-msg");
+    if (!picked) { msg.textContent = "Pick what happened."; return; }
+    const didNotHappen = picked === "no_show" || picked === "cancelled";
+    const body = { action: "log_showing", showing_id: showingId, outcome: picked, by: (ME && ME.full_name) || "app" };
+    if (!didNotHappen) {
+      body.disliked_points = ov.querySelector("#lg-dis").value;
+      body.liked_points    = ov.querySelector("#lg-lik").value;
+      body.beds  = ov.querySelector("#lg-beds").value;
+      body.baths = ov.querySelector("#lg-baths").value;
+      body.sqft  = ov.querySelector("#lg-sqft").value;
+      body.lot_acres  = ov.querySelector("#lg-acres").value;
+      body.list_price = ov.querySelector("#lg-price").value;
+    }
+    ov.querySelector("#lg-save").disabled = true;
+    const r = await lapi("", { method: "POST", body: JSON.stringify(body) });
+    if (r.error) { msg.textContent = "Not saved: " + r.error; ov.querySelector("#lg-save").disabled = false; return; }
+    ov.remove();
+    loadLead(window.__lead.lead.id);
+  };
 };
 window.closeTeamBox = () => { const b = document.getElementById("teambox"); if (b) b.style.display = "none"; };
 /* REFER THE CLIENT (Josh 2026-08-20: "i want to select Jeffrey Salas and send to John Stanley").
