@@ -1310,7 +1310,7 @@ async function loadLead(id) {
         <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
         <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
         <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="whoIsFree(${L.lat ?? "null"}, ${L.lng ?? "null"})">🗓️ Who is free?</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
+      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="whoIsFree(${L.lat ?? "null"}, ${L.lng ?? "null"})">🗓️ Who is free?</button><button class="btn ghost" style="margin-left:8px" onclick="recommendAgent('${L.id}')">🤖 Who should take this?</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
       <div id="referbox" style="display:none;margin-top:10px"></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
@@ -2039,6 +2039,43 @@ window.showAgentDay = async (agentId, date) => {
   </div>`);
 };
 /* From a lead: who could take this, on the day we are trying to book. */
+/* Who should take this one. The numbers are computed server-side and the model only weighs them,
+   so the panel shows BOTH: the recommendation in words, and the ranking it came from. If you
+   disagree with the sentence you can see the arithmetic underneath it and overrule it. */
+window.recommendAgent = async (leadId) => {
+  const day = prompt("Which day? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
+  if (!day) return;
+  const at = prompt("Roughly what time? (24h, e.g. 15:00 — leave blank if flexible)", "") || "";
+  const ov = popup('<h2>🤖 Working it out…</h2><div class="body"><div class="meta">Checking each agent against that day.</div></div>');
+  const d = await lapi("&section=recommend&lead=" + encodeURIComponent(leadId) + "&date=" + encodeURIComponent(day)
+    + (at ? "&at=" + encodeURIComponent(at) : ""));
+  ov.remove();
+  if (d.error) { alert(d.error); return; }
+  const r = d.recommendation;
+  popup(`<h2>🤖 Who should take this</h2><div class="body">
+    ${r ? `<div style="background:#e9f9f2;border:1px solid #b9e6d0;border-radius:10px;padding:11px 13px;margin-bottom:10px">
+      <div style="font-size:16px;font-weight:800;color:var(--green)">${esc(r.pick)}</div>
+      <div style="margin-top:3px">${esc(r.why||"")}</div>
+      ${r.runner_up?`<div class="meta" style="margin-top:4px">Runner-up: ${esc(r.runner_up)}</div>`:""}
+      ${r.caution?`<div class="meta" style="margin-top:4px;color:var(--amber)"><b>⚠ ${esc(r.caution)}</b></div>`:""}
+    </div>` : `<div class="meta" style="margin-bottom:10px">${esc(d.note||"No AI answer — the ranking below is the answer.")}</div>`}
+    <div class="meta" style="margin-bottom:4px"><b>How it ranked them${d.requested_time?` for ${esc(d.requested_time)}`:""}</b></div>
+    ${(d.ranked||[]).map((f,i) => `<div class="row">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="meta">${i+1}.</span><span class="whoName">${esc(f.name)}</span>
+        ${f.clashes_with_requested_time?'<span class="st st-needs">clashes with that time</span>'
+          : f.booked ? `<span class="st st-waiting">${f.booked} booked${f.times.length?" · "+f.times.join(", "):""}</span>`
+          : '<span class="st st-answered">wide open</span>'}
+        ${f.located?`<span class="kind">${f.miles_from_home} mi from home</span>`:'<span class="kind hot">home unknown</span>'}
+        ${f.miles_from_last_stop!=null?`<span class="kind">${f.miles_from_last_stop} mi from their last stop</span>`:""}
+        ${f.reachable?"":'<span class="kind hot">no phone — cannot be told</span>'}
+        <span style="flex:1"></span>
+        <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="showAgentDay('${f.id}','${esc(d.date)}')">Day</button>
+      </div></div>`).join("")}
+    <div class="meta" style="margin-top:10px">${esc(d.basis)}.</div>
+    <div style="margin-top:8px"><button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Close</button></div>
+  </div>`);
+};
 window.whoIsFree = async (lat, lng) => {
   const day = prompt("Which day are you trying to book? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
   if (!day) return;
