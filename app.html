@@ -164,6 +164,8 @@ const MODULES = [
   { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
+  { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
+  { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
@@ -1601,7 +1603,111 @@ function showSecret(title, pw, email) {
     <div class="meta" style="margin-top:4px">Write this down now — it is not stored and cannot be shown again. Use “Reset password” if it is lost.</div></div>`;
   if (out) out.innerHTML = html; else alert(title + "\n\nOne-time password: " + pw);
 }
+/* ---------- SHOWINGS and OFFERS (Josh 2026-08-20) ----------
+   "This will allow us to watch leads move to showings and showings to offers and when offers get
+   accepted they go under contract and hit our INRE platform."
+
+   The funnel had no middle. Leads had a queue and Owed had money, but the two steps that turn one
+   into the other were invisible: a showing booked, and an offer submitted.
+
+   A showing's truth is split across two tables -- the request knows who is covering it, the
+   showings row knows whether it happened -- so both are read and reconciled on the address. */
+async function viewShowings() {
+  V().innerHTML = `<h1>Showings</h1>
+    <div class="sub">Every tour we have booked, and whether it actually happened.</div>
+    <div id="stiles" class="ztiles"></div>
+    <div class="card"><h2>📅 Showings</h2><div class="body" id="slist">Loading…</div></div>`;
+  const d = await lapi("&section=showings");
+  const rows = d.showings || [], c = d.counts || {};
+  const LBL = { needs_agent:["🚨 no agent yet","st-needs"], booked:["📅 booked","st-waiting"],
+                happened:["✅ happened","st-answered"], verified:["✅ verified","st-answered"] };
+  document.getElementById("stiles").innerHTML =
+      `<div class="ztile"><span>No agent yet</span><b style="color:${c.needs_agent?"var(--red)":"var(--green)"}">${c.needs_agent||0}</b><em>a tour with nobody to show it</em></div>`
+    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>agent assigned</em></div>`
+    + `<div class="ztile"><span>Happened</span><b>${c.happened||0}</b><em>awaiting confirmation</em></div>`
+    + `<div class="ztile"><span>Verified</span><b style="color:var(--green)">${c.verified||0}</b><em>confirmed by a person</em></div>`;
+  document.getElementById("slist").innerHTML = rows.length ? rows.map(r => {
+    const [lbl, cls] = LBL[r.stage] || ["", "st-waiting"];
+    return `<div class="row" style="border-left:3px solid ${r.stage==="needs_agent"?"var(--red)":r.stage==="verified"?"var(--green)":"var(--line)"};padding-left:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="whoName">${esc(r.client)}</span>
+        <span class="st ${cls}">${lbl}</span>
+        ${r.agent ? `<span class="kind ${r.agent_is_team?"lane-agent":""}">${esc(r.agent)}${r.agent_is_team?" (in-house)":""}</span>` : ""}
+        ${r.has_offer ? `<span class="st st-answered">💰 offer in</span>` : ""}
+        <span style="flex:1"></span>
+        ${!r.has_offer && (r.happened || r.stage==="verified") ? `<button style="padding:4px 11px;font-size:11.5px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Log an offer</button>` : ""}
+        <a class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:6px;text-decoration:none" href="#/leads" onclick="jumpToLead('${r.lead_id}')">Open lead</a>
+      </div>
+      <div class="meta">${esc(r.address||"(no address)")}${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
+      ${r.feedback?`<div class="meta">Feedback: <i>${esc(r.feedback)}</i></div>`:""}</div>`;
+  }).join("") : `<div class="empty">No showings booked yet.</div>`;
+}
+
+/* An accepted offer with no INRE transaction id is an unfinished handoff, not a finished deal.
+   The page says so out loud, because that is the moment a referral quietly stops being tracked. */
+async function viewOffers() {
+  V().innerHTML = `<h1>Offers</h1>
+    <div class="sub">Offers we have put in, and the ones that became deals on the INRE platform.</div>
+    <div id="otiles" class="ztiles"></div>
+    <div class="card"><h2>💰 Offers</h2><div class="body" id="olist">Loading…</div></div>`;
+  const d = await lapi("&section=offers");
+  const rows = d.offers || [], c = d.counts || {};
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  document.getElementById("otiles").innerHTML =
+      `<div class="ztile"><span>Out now</span><b>${c.submitted||0}</b><em>waiting on an answer</em></div>`
+    + `<div class="ztile"><span>Accepted</span><b style="color:var(--green)">${c.accepted||0}</b><em>under contract</em></div>`
+    + `<div class="ztile"><span>Owed to INRE</span><b style="color:${c.awaiting_handoff?"var(--amber)":"var(--green)"}">${c.awaiting_handoff||0}</b><em>accepted, not handed off</em></div>`
+    + `<div class="ztile"><span>Did not land</span><b>${c.lost||0}</b><em>rejected or withdrawn</em></div>`;
+  document.getElementById("olist").innerHTML = rows.length ? rows.map(o => `
+    <div class="row" style="border-left:3px solid ${o.awaiting_handoff?"var(--amber)":o.status==="accepted"?"var(--green)":o.status==="submitted"?"var(--blue)":"var(--line)"};padding-left:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="whoName">${esc(o.client)}</span>
+        <span class="st ${o.status==="accepted"?"st-answered":o.status==="submitted"?"st-waiting":"st-needs"}">${esc(o.status)}</span>
+        <b>${$(o.offer_price)}</b>${o.list_price?`<span class="meta">asking ${$(o.list_price)}</span>`:""}
+        ${o.awaiting_handoff?`<span class="st st-needs">⚠ not on INRE yet</span>`:""}
+        ${o.inre_transaction_id?`<span class="kind lane-agent">INRE ${esc(o.inre_transaction_id)}</span>`:""}
+      </div>
+      <div class="meta">${esc(o.address)}${o.agent?" · "+esc(o.agent):""} · offered ${et(o.offered_at)}</div>
+      ${o.note?`<div class="meta">${esc(o.note)}</div>`:""}
+      <div style="margin-top:6px">
+        ${o.status==="submitted"?`<button onclick="settleOffer('${o.id}','accepted')">Accepted</button>
+          <button class="btn ghost" style="margin-left:6px" onclick="settleOffer('${o.id}','rejected')">Rejected</button>
+          <button class="btn ghost" style="margin-left:6px" onclick="settleOffer('${o.id}','withdrawn')">Withdrawn</button>`:""}
+        ${o.awaiting_handoff?`<button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button>`:""}
+      </div></div>`).join("")
+    : `<div class="empty">No offers yet. Log one from a showing that has happened.</div>`;
+}
+window.newOffer = async (leadId, address) => {
+  const raw = prompt("What did we offer on " + address + "?\n\nEnter the amount in dollars.");
+  if (raw === null) return;
+  const price = Number(String(raw).replace(/[$,\s]/g, ""));
+  if (!Number.isFinite(price) || price <= 1000) { alert("Enter a real offer amount above $1,000."); return; }
+  const note = prompt("Anything worth remembering about this offer? (optional)") || "";
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"submit_offer", lead_id:leadId, property_address:address, offer_price:price, note, by:(ME&&ME.full_name)||"app" }) });
+  if (r.error) { alert("Not logged: " + r.error); return; }
+  location.hash = "#/offers";
+};
+window.settleOffer = async (id, status) => {
+  let accepted_price = null;
+  if (status === "accepted") {
+    const raw = prompt("Accepted at what price? (leave blank if it was our offer price)");
+    if (raw === null) return;
+    if (String(raw).trim()) accepted_price = Number(String(raw).replace(/[$,\s]/g, ""));
+  } else if (!confirm("Mark this offer " + status + "?")) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"set_offer_status", offer_id:id, status, accepted_price }) });
+  if (r.error) { alert("Not changed: " + r.error); return; }
+  if (status === "accepted") alert("Under contract.\n\nNext: create the transaction on the INRE platform, then record its id here so the two systems agree.");
+  viewOffers();
+};
+window.handOff = async (id) => {
+  const t = prompt("INRE transaction id for this deal:\n\nThis is what links the referral to the transaction on the INRE platform.");
+  if (!t || !t.trim()) return;
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"hand_off_offer", offer_id:id, inre_transaction_id:t.trim() }) });
+  if (r.error) { alert("Not recorded: " + r.error); return; }
+  viewOffers();
+};
 async function viewProfile() {
+
   V().innerHTML = `<h1>My Profile</h1><div class="sub">Account + connected integrations</div>
     <div class="card"><h2>Identity</h2><div class="body">
       <div class="row"><span class="meta">Name</span><div class="whoName">${esc(ME.full_name||"")}</div></div>
