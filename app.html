@@ -157,8 +157,11 @@ function renderLogin(err, notice) {
 
 /* ---------- SHELL + ROUTER (INRE MODULES pattern) ---------- */
 const MODULES = [
-  { id:"home",      nav:"Home",      match: h => h.startsWith("#/home") || h === "#/" || h === "#" || h === "", render: () => viewHome() },
-  { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board"),     render: () => viewBoard() },
+  // Pipeline is the front page now. Josh 2026-08-19: "I want to remove the whole Home Page I
+  // don't like it and it's not useful." It was a lobby -- a strip of links to other tabs, a
+  // duplicate of Newest Leads, and a live feed that repainted every ten seconds. Pipeline
+  // answers the same question (what is happening, whose hands is it in) with the actual work.
+  { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
@@ -337,48 +340,6 @@ window.addEventListener("hashchange", route);
    One screen for "what is happening and what needs me". The pay queue and the partner scorecard
    used to live here as well; they were removed, not moved — Owed and Agents already own them,
    and a second place to pay a showing agent is a second place to pay them twice. */
-async function viewHome() {
-  V().innerHTML = `<h1>Home</h1><div class="sub" id="stamp">loading…</div>
-    <div id="needs"></div>
-    <div id="d"></div>
-    <div class="card"><h2>🆕 Newest leads</h2><div class="body" id="newleads">…</div></div>
-    <div class="card"><h2>⚡ Live activity</h2><div class="body" id="feed">Loading…</div></div>`;
-  await drawHomeCards();
-  await drawFeed();
-  clearInterval(window.__feedPoll);
-  window.__feedPoll = setInterval(drawFeed, 10000);
-}
-async function drawHomeCards() {
-  const d = await api("");
-  document.getElementById("stamp").textContent = "as of " + d.generated_et + " ET";
-  // The three things that cost money while they sit, above everything else on the page.
-  try {
-    // the pills fetch is async and may not have landed on first paint — ask directly if so
-    const b = window.__bots || await api("?fn=bots").catch(() => ({}));
-    const [bd, cm] = await Promise.all([api("?fn=leads&section=board"), api("?fn=leads&section=commitments")]);
-    const bits = [];
-    if (bd.counts && bd.counts.total) bits.push(['<a href="#/board">', bd.counts.total + " waiting for an agent", "</a>"].join(""));
-    if (b.awaiting_verify) bits.push(['<a href="#/owed">', b.awaiting_verify + " showing" + (b.awaiting_verify>1?"s":"") + " to confirm", "</a>"].join(""));
-    if (cm.overdue) bits.push(['<a href="#/owed">', cm.overdue + " promise" + (cm.overdue>1?"s":"") + " past due", "</a>"].join(""));
-    const n = document.getElementById("needs");
-    if (n) n.innerHTML = bits.length
-      ? '<div class="card" style="border-color:#f0dfae;background:#fffdf6"><div class="body" style="font-size:14px;font-weight:600;color:var(--brand)">Needs you now: ' + bits.join(" &nbsp;·&nbsp; ") + "</div></div>"
-      : '<div class="card" style="border-color:#cfe9dd;background:#f5fbf8"><div class="body" style="font-size:14px;color:var(--green);font-weight:600">Nothing is waiting on you.</div></div>';
-  } catch (e) { /* the strip is a bonus, never a blocker */ }
-  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
-  let hh = "";
-  hh += `<div class="card"><h2>🚨 Open alerts (${d.alerts.length})</h2><div class="body">` + (d.alerts.length ? d.alerts.slice(0,12).map(a =>
-    `<div class="row"><span class="kind ${a.kind.includes("hot")?"hot":""}">${esc(a.kind)}</span>${esc(a.message)}
-     <div class="meta">${et(a.created_at)} · <a href="#" onclick="resolveAlert('${a.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
-    + (d.alerts.length>12?`<div class="meta" style="padding-top:8px">+ ${d.alerts.length-12} more</div>`:"") : `<div class="empty">All clear.</div>`) + `</div></div>`;
-  // Pay queue lives on Owed now — one place to pay someone, with amount and method recorded.
-  // Deal economics used to live here. Josh 2026-08-18: "Remove the Deal Economics
-  // entirely from HOME. I'll build that out somewhere else." The SERVER side stays intact --
-  // cockpit still returns `economics` with the offer gate applied, and record_offer /
-  // withdraw_offer still work -- so the new surface only has to render it.
-  // Partner scorecard lives on Agents now, next to the agreements and payout methods it needs.
-  document.getElementById("d").innerHTML = hh;
-}
 /* ---------- NURTURE (Josh 2026-08-18) ----------
    The third exit. A lead nobody should be chasing looked exactly like a lead nobody had got to,
    so both sat in "nobody is covering this yet". Nurturing asks for a reason and a date, because
@@ -413,15 +374,15 @@ window.recordOffer = async (placementId, client) => {
   if (!confirm(`Record an offer of $${price.toLocaleString("en-US")} for ${client}?\n\nThis starts projecting commission on this deal.`)) return;
   const r = await api("", { method:"POST", body: JSON.stringify({ action:"record_offer", placement_id:placementId, offer_price:price }) });
   if (r.error) { alert("Not recorded: " + r.error); return; }
-  viewHome();
+  route(); // the economics card left Home; its new surface will re-render itself
 };
 window.withdrawOffer = async (placementId) => {
   if (!confirm("Withdraw this offer?\n\nThe deal stops projecting any commission and goes back to showing fees only.")) return;
   const r = await api("", { method:"POST", body: JSON.stringify({ action:"withdraw_offer", placement_id:placementId }) });
   if (r.error) { alert("Not withdrawn: " + r.error); return; }
-  viewHome();
+  route();
 };
-window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); viewHome(); };
+window.resolveAlert = async (id) => { await api("", { method:"POST", body: JSON.stringify({ action:"resolve_alert", alert_id:id }) }); drawAlerts(); };
 // approvePayable / markPaid were removed with the Home pay-queue card. They were the OLD way to
 // settle a debt — "mark paid" with no amount and no method — and leaving them reachable meant two
 // different records of the same payment could exist. Owed is the one place now, and it insists on
@@ -806,26 +767,6 @@ const FEEDLABEL = {
   hot_sla_nudge:"🔥 SLA nudge", draft_approved_reply:"✅ Tony's reply", manual_app_send:"✅ Manual send",
   optout_confirm:"🛑 Opt-out confirmed", task_reminder:"📋 Task reminder", call:"📞 Call", inbound:"⬅ They texted", outbound:"➡ Text",
 };
-async function drawFeed() {
-  if (!location.hash.startsWith("#/home") && location.hash !== "" && location.hash !== "#/") {
-    clearInterval(window.__feedPoll); window.__feedPoll = null; return;
-  }
-  const d = await api("?section=feed");
-  refreshModeBadge();
-  const nl = document.getElementById("newleads"); if (!nl) return;
-  nl.innerHTML = (d.new_leads||[]).map(l =>
-    `<div class="row"><span class="whoName">${esc((l.first_name||"")+" "+(l.last_name||""))}</span>
-     <span class="kind">${esc(l.intent||"new")}</span> ${esc(l.first_inquiry_city||"")}
-     ${l.est_purchase_price?`· $${Number(l.est_purchase_price).toLocaleString()}`:""}
-     <span class="meta">${et(l.created_at)}</span></div>`).join("") || `<div class="empty">No leads yet.</div>`;
-  document.getElementById("feed").innerHTML = (d.feed||[]).map(f => {
-    const label = FEEDLABEL[f.type] || (f.dir==="in"?"⬅ "+f.type:"➡ "+f.type);
-    const st = f.status && f.status!=="sent" ? ` <span class="kind ${f.status==="blocked_allowlist"?"":"hot"}">${esc(f.status)}</span>` : "";
-    return `<div class="row"><span class="kind">${esc(label)}</span>
-      <span class="whoName">${esc(f.who||"")}</span>${st}
-      <div class="meta">"${esc(f.body)}"</div><div class="meta">${et(f.at)}</div></div>`;
-  }).join("") || `<div class="empty">Quiet so far — activity appears here the moment it happens.</div>`;
-}
 
 /* ---------- AGENTS (partners + recruiting bench) ---------- */
 const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent", active:"lane-client", inactive:"hot" };
@@ -1043,15 +984,31 @@ async function viewBoard() {
   V().innerHTML = `<h1>Pipeline</h1>
     <div class="sub">Every lead that wants a tour, and whose hands it is in right now.</div>
     <div id="ptiles" class="ztiles"></div>
+    <div class="card"><h2>🚨 Open alerts</h2><div class="body" id="palerts">Loading…</div></div>
     <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>
     <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>
     <div class="card"><h2>✅ Assigned — is anything happening?</h2><div class="body" id="p3">…</div></div>
     <div class="card"><h2>📅 Showings on the books</h2><div class="body" id="p4">…</div></div>`;
-  await drawBoard();
+  await Promise.all([drawBoard(), drawAlerts()]);
   window.__boardPoll = setInterval(() => {
-    if (!location.hash.startsWith("#/board")) { clearInterval(window.__boardPoll); window.__boardPoll = null; return; }
+    if (!location.hash.startsWith("#/board") && location.hash !== "" && location.hash !== "#/") {
+      clearInterval(window.__boardPoll); window.__boardPoll = null; return;
+    }
     drawBoard(true);
   }, 60000);
+}
+/* Alerts lived on Home and nowhere else, so deleting Home would have deleted the only place they
+   could be seen or resolved. They belong next to the pipeline anyway -- an alert is a thing that
+   has gone wrong with the work on this page. */
+async function drawAlerts() {
+  const el = document.getElementById("palerts"); if (!el) return;
+  const d = await api("").catch(() => ({}));
+  const a = d.alerts || [];
+  el.innerHTML = a.length
+    ? a.slice(0, 12).map(x => `<div class="row"><span class="kind ${String(x.kind).includes("hot")?"hot":""}">${esc(x.kind)}</span>${esc(x.message)}
+        <div class="meta">${et(x.created_at)} · <a href="#" onclick="resolveAlert('${x.id}');return false" style="color:var(--blue)">resolve</a></div></div>`).join("")
+      + (a.length > 12 ? `<div class="meta" style="padding-top:8px">+ ${a.length - 12} more</div>` : "")
+    : `<div class="empty">All clear.</div>`;
 }
 async function drawBoard(silent) {
   const d = await lapi("&section=pipeline");
