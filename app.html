@@ -805,10 +805,34 @@ async function viewRecruiting() {
     <div id="rtiles" class="ztiles"></div>
     <div class="card"><h2>🎯 The bench</h2><div class="body" id="bench">Loading…</div></div>`;
   const d = await api("?section=agents");
-  const jobs = (d.recruiting || []).map(j => {
-    const cands = j.candidates || [];
-    return { ...j, cands,
-      left: cands.filter(c => !c.contacted && !c.declined && c.phone).length,
+  // GROUP BY TOWN, not by job. A town can carry a standing bench AND jobs opened for individual
+  // leads, holding overlapping people; listing jobs meant Kalkaska could appear three times with
+  // the same agents under each. The town is the unit that matters -- "who can show a house here"
+  // -- so the rows are towns and the candidates are merged, deduped on the last ten digits of the
+  // phone. Text-all still targets a real job id: the one with the most people left to contact.
+  const byTown = new Map();
+  for (const j of (d.recruiting || [])) {
+    const key = String(j.gap_city || "(no town)").trim().toLowerCase();
+    if (!byTown.has(key)) byTown.set(key, { gap_city: String(j.gap_city || "(no town)").trim(), ids: [], seen: new Map() });
+    const t = byTown.get(key);
+    t.ids.push(j);
+    for (const c of (j.candidates || [])) {
+      const digits = String(c.phone || "").replace(/\D/g, "").slice(-10);
+      const id = digits || String(c.name || "").toLowerCase().trim();
+      if (!id) continue;
+      const prev = t.seen.get(id);
+      // a contacted or declined record always wins over a fresh-looking duplicate
+      if (!prev || (!prev.contacted && c.contacted) || (!prev.declined && c.declined)) t.seen.set(id, c);
+    }
+  }
+  const jobs = [...byTown.values()].map(t => {
+    const cands = [...t.seen.values()];
+    const left = cands.filter(c => !c.contacted && !c.declined && c.phone).length;
+    // whichever underlying job has the most uncontacted people is the one Text-all should drive
+    const best = t.ids.slice().sort((a, b) =>
+      (b.candidates || []).filter(c => !c.contacted && !c.declined && c.phone).length -
+      (a.candidates || []).filter(c => !c.contacted && !c.declined && c.phone).length)[0];
+    return { id: best.id, gap_city: t.gap_city, status: best.status, cands, left,
       texted: cands.filter(c => c.contacted).length,
       declined: cands.filter(c => c.declined).length };
   }).sort((a, b) => (b.left - a.left) || String(a.gap_city).localeCompare(String(b.gap_city)));
