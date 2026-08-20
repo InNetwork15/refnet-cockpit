@@ -1314,6 +1314,7 @@ async function loadLead(id) {
       <div id="referbox" style="display:none;margin-top:10px"></div>
       <div id="teambox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
+      ${renderToured(d)}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
     <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
@@ -1330,6 +1331,94 @@ function renderTimelineItem(t) {
     ${t.transcript?`<div style="margin-top:4px"><a href="#" style="font-size:11.5px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';return false">show transcript</a><div style="display:none;font-size:11.5px;white-space:pre-wrap;margin-top:4px">${esc(t.transcript)}</div></div>`:""}
     <span class="meta">${et(t.at)}${t.type?" · "+esc(t.type):""}${t.send_status&&t.send_status!=="sent"?" · "+esc(t.send_status):""}</span></div>`;
 }
+/* ---------- WHAT THIS CLIENT HAS SEEN (Josh 2026-08-20) ----------
+   "add properties that are seen and the date and time of the showings and log the results and even
+   take in some facts about that house."
+
+   The facts and the reaction are captured together because they are only useful together: "passed,
+   too much road noise, 3 bed / 2 bath on 1.2 acres at $240k" is a search filter. Either half on its
+   own is an anecdote. None of it can be recovered later -- if it is not written down at the
+   debrief it is gone -- which is why the form is on the lead rather than somewhere you have to
+   remember to go.
+
+   NOTE the honest gap: this captures the data a "find similar homes" search would need. It cannot
+   run that search, because there is no listing inventory in this system to search. */
+const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it","st-answered"],
+                  maybe:["🤔 maybe","st-waiting"], passed:["👎 passed","st-needs"],
+                  offer_made:["💰 offered","st-answered"] };
+function renderToured(d) {
+  const t = d.toured || [];
+  const facts = (x) => [x.beds!=null?`${x.beds} bd`:null, x.baths!=null?`${x.baths} ba`:null,
+    x.sqft?`${Number(x.sqft).toLocaleString()} sqft`:null, x.lot_acres!=null?`${x.lot_acres} ac`:null,
+    x.year_built?`built ${x.year_built}`:null, x.list_price?`$${Number(x.list_price).toLocaleString()}`:null,
+    x.style||null].filter(Boolean).join(" · ");
+  return `<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+      <b style="font-size:13px">Homes seen (${t.length})</b>
+      <span style="flex:1"></span>
+      <button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${d.lead.id}')">📅 Schedule a showing</button>
+    </div>
+    ${t.length ? t.map(x => {
+      const [lbl, cls] = OUTCOME[x.outcome] || [null, null];
+      return `<div class="row" style="border-left:3px solid ${x.outcome==="passed"?"var(--red)":x.outcome?"var(--green)":"var(--line)"};padding-left:10px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <b>${esc(x.address||"(no address)")}</b>
+          ${lbl?`<span class="st ${cls}">${lbl}</span>`:`<span class="st st-waiting">not debriefed</span>`}
+          ${x.mapped?"":'<span class="kind hot">not mapped</span>'}
+          <span style="flex:1"></span>
+          <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="logShowing('${x.id}','${esc(String(x.address||"").replace(/'/g,""))}')">${x.outcome?"Edit":"Log result"}</button>
+        </div>
+        <div class="meta">${et(x.at)}${x.agent?" · "+esc(x.agent):""}${x.minutes?" · "+x.minutes+" min":""}</div>
+        ${facts(x)?`<div class="meta">${esc(facts(x))}</div>`:""}
+        ${x.liked?`<div class="meta">👍 ${esc(x.liked)}</div>`:""}
+        ${x.disliked?`<div class="meta">👎 ${esc(x.disliked)}</div>`:""}
+      </div>`;
+    }).join("") : `<div class="meta">Nothing shown yet.</div>`}
+  </div>`;
+}
+window.scheduleShowing = async (leadId) => {
+  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"team_agents" }) });
+  const team = r.team || [];
+  if (!team.length) { alert("No team agents on file."); return; }
+  const addr = prompt("Which property? (street, city)", (window.__lead?.lead?.first_inquiry_address || "") + (window.__lead?.lead?.first_inquiry_city ? ", " + window.__lead.lead.first_inquiry_city : ""));
+  if (!addr || !addr.trim()) return;
+  const who = prompt("Which agent?\n\n" + team.map((t,i) => `${i+1}. ${t.full_name}`).join("\n") + "\n\nEnter a number:");
+  if (!who) return;
+  const agent = team[Number(who) - 1];
+  if (!agent) { alert("That was not one of the options."); return; }
+  const date = prompt("Date? (YYYY-MM-DD)", new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10));
+  if (!date) return;
+  const time = prompt("Time? (24h, e.g. 14:30)", "14:00");
+  if (!time) return;
+  const mins = Number(prompt("How long, in minutes?", "45")) || 45;
+  const res = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"schedule_showing", lead_id: leadId, partner_agent_id: agent.id,
+    property_address: addr.trim(), scheduled_at: `${date}T${time}:00-04:00`,
+    duration_minutes: mins, by:(ME&&ME.full_name)||"app" }) });
+  if (res.error) { alert("Not booked: " + res.error); return; }
+  alert(`Booked with ${agent.full_name}.\n\n` +
+    (res.agent_notified === "sent" ? "They have been texted." :
+     res.agent_notified === "no_phone" ? "⚠ They have NO phone number on file, so they were not told. Add one on their profile." :
+     `Notification status: ${res.agent_notified}.`));
+  loadLead(leadId);
+};
+window.logShowing = async (showingId, address) => {
+  const outcome = prompt(`How did ${address} go?\n\nloved / liked / maybe / passed / offer_made`);
+  if (outcome === null) return;
+  const disliked = prompt("What did NOT work? (this is the most useful thing you can write — what they rule out predicts the next house better than what they say they want)") || "";
+  const liked = prompt("What DID they like? (optional)") || "";
+  const beds = prompt("Beds? (optional)") || "";
+  const baths = prompt("Baths? (optional)") || "";
+  const sqft = prompt("Square feet? (optional)") || "";
+  const acres = prompt("Lot acres? (optional)") || "";
+  const price = prompt("Asking price? (optional)") || "";
+  const r = await lapi("", { method:"POST", body: JSON.stringify({
+    action:"log_showing", showing_id: showingId, outcome: outcome.trim().toLowerCase(),
+    disliked_points: disliked, liked_points: liked,
+    beds, baths, sqft, lot_acres: acres, list_price: price, by:(ME&&ME.full_name)||"app" }) });
+  if (r.error) { alert("Not logged: " + r.error); return; }
+  loadLead(window.__lead.lead.id);
+};
 window.closeTeamBox = () => { const b = document.getElementById("teambox"); if (b) b.style.display = "none"; };
 /* REFER THE CLIENT (Josh 2026-08-20: "i want to select Jeffrey Salas and send to John Stanley").
    A different act from assigning a showing, so it gets its own control and its own list. Sending
