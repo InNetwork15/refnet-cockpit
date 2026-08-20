@@ -1822,7 +1822,9 @@ async function drawUsers() {
   el.innerHTML = `<div style="overflow-x:auto"><table>
     <tr><th>Name</th><th>Email</th><th>Role</th><th>Last signed in</th><th></th></tr>` +
     us.map(u => `<tr${u.disabled ? ' style="opacity:.5"' : ""}>
-      <td><span class="whoName">${esc(u.full_name || "—")}</span>${u.disabled ? ' <span class="kind">disabled</span>' : ""}${u.auth_missing ? ' <span class="kind hot">cannot log in</span>' : ""}</td>
+      <td><input value="${esc(u.full_name || "")}" data-name="${u.id}" title="Click to edit, then press Enter"
+            style="font-weight:600;color:var(--brand);border:1px solid transparent;background:transparent;padding:3px 5px;width:150px">
+        ${u.disabled ? ' <span class="kind">disabled</span>' : ""}${u.auth_missing ? ' <span class="kind hot">cannot log in</span>' : ""}</td>
       <td class="meta">${esc(u.email)}</td>
       <td><select data-role="${u.id}" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:12px">
         <option value="agent"${u.role === "agent" ? " selected" : ""}>agent</option>
@@ -1833,6 +1835,20 @@ async function drawUsers() {
         <button class="btn ghost" style="padding:4px 9px;font-size:11px" data-pw="${u.id}" data-n="${esc(u.full_name || u.email)}">Reset password</button>
         <button class="btn ghost" style="padding:4px 9px;font-size:11px;margin-left:4px" data-act="${u.id}" data-d="${u.disabled ? 0 : 1}" data-n="${esc(u.full_name || u.email)}">${u.disabled ? "Enable" : "Disable"}</button>
       </td></tr>`).join("") + `</table></div>`;
+  // A login's NAME was the one thing an admin could not change, which is how "Anthony Wright" sat
+  // on Tony's account for days -- with two Wrights on the team, a wrong label is a real hazard.
+  el.querySelectorAll("[data-name]").forEach(i => {
+    i.onfocus = () => { i.style.border = "1px solid var(--line)"; i.style.background = "#fff"; };
+    i.onkeydown = async (e) => { if (e.key === "Enter") i.blur(); };
+    i.onblur = async () => {
+      i.style.border = "1px solid transparent"; i.style.background = "transparent";
+      const name = i.value.trim();
+      if (!name || name === (i.defaultValue || "")) return;
+      const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "update_profile", user_id: i.dataset.name, full_name: name }) });
+      if (r.error) { alert("Not renamed: " + r.error); }
+      drawUsers();
+    };
+  });
   el.querySelectorAll("[data-role]").forEach(s => s.onchange = async (e) => {
     const r = await uapi("", { method: "POST", body: JSON.stringify({ action: "set_role", user_id: e.target.dataset.role, role: e.target.value }) });
     if (r.error) { alert("Not changed: " + r.error); }
