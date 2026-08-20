@@ -170,8 +170,10 @@ const MODULES = [
   { id:"email",     nav:"Email",     match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
   { id:"recruiting",nav:"Recruiting",match: h => h.startsWith("#/recruiting"),render: () => viewRecruiting() },
-  { id:"zips",      nav:"Leads by ZIP", match: h => h.startsWith("#/zips"),   render: () => viewZips() },
-  { id:"map",       nav:"Coverage Map", match: h => h.startsWith("#/map"),    render: () => viewMap() },
+  // Josh 2026-08-20: "leads by zip and coverage map should be combined into one page." They were
+  // two answers to the same question -- where is this business happening -- split across two tabs,
+  // so you had to hold one in your head to read the other. One page, one map area, two views of it.
+  { id:"zips",      nav:"Coverage",  match: h => h.startsWith("#/zips") || h.startsWith("#/map"), render: () => viewZips() },
   // My Profile is reachable from the avatar menu; it does not need a tab of its own too.
   { id:"profile",   nav:null,        match: h => h.startsWith("#/profile"),   render: () => viewProfile() },
 ];
@@ -1381,14 +1383,39 @@ function loadLeaflet() {
   });
 }
 async function viewZips() {
-  V().innerHTML = `<h1>Leads by ZIP</h1>
+  V().innerHTML = `<h1>Coverage</h1>
     <div class="sub" id="zsub">Loading lead geography…</div>
     <div class="zchips" id="zlane"></div>
     <div class="zchips" id="zchips"></div>
     <div id="ztiles" class="ztiles"></div>
-    <div class="card"><h2>🗺️ Where the leads are — hover a bubble</h2>
-      <div class="body" style="padding:0"><div id="zmap" style="height:440px;border-radius:0 0 16px 16px"></div></div></div>
+    <div class="card">
+      <h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">🗺️ The map
+        <span style="flex:1"></span>
+        <button id="mv-leads" class="btn" style="padding:4px 11px;font-size:11.5px">Lead density</button>
+        <button id="mv-agents" class="btn ghost" style="padding:4px 11px;font-size:11.5px">Agent coverage</button></h2>
+      <div class="body" style="padding:0">
+        <div id="zmap" style="height:440px;border-radius:0 0 16px 16px"></div>
+        <div id="amap" style="display:none;height:440px"></div>
+      </div></div>
     <div class="card"><h2>📋 Every ZIP, every window</h2><div class="body" id="ztable">…</div></div>`;
+  // Two views of the same ground: bubbles = where the leads come from, circles = who can reach
+  // them. The agent map is an iframe and only loads when asked for, so the page is not paying for
+  // a second map nobody looked at.
+  {
+    const bl = document.getElementById("mv-leads"), ba = document.getElementById("mv-agents");
+    const zm = document.getElementById("zmap"), am = document.getElementById("amap");
+    bl.onclick = () => { zm.style.display = ""; am.style.display = "none";
+      bl.className = "btn"; ba.className = "btn ghost";
+      if (ZMAP) setTimeout(() => ZMAP.invalidateSize(), 30); };
+    ba.onclick = () => {
+      zm.style.display = "none"; am.style.display = "";
+      bl.className = "btn ghost"; ba.className = "btn";
+      if (!am.dataset.loaded) {
+        am.innerHTML = `<iframe src="map.html#${MAP_VIEW_TOKEN}" style="width:100%;height:100%;border:0"></iframe>`;
+        am.dataset.loaded = "1";
+      }
+    };
+  }
   const d = await zapi("&section=zip_report" + (ZLANE ? "&lane=" + ZLANE : ""));
   window.__zips = d;
   document.getElementById("zsub").innerHTML =
@@ -1509,10 +1536,6 @@ function drawZTable() {
       </tr></tfoot></table></div>`;
 }
 
-function viewMap() {
-  V().innerHTML = `<h1>Coverage Map</h1><div class="sub">Leads (blue) + partners (teal) with coverage circles.</div>
-    <div class="card" style="height:calc(100vh - 230px);min-height:420px"><iframe src="map.html#${MAP_VIEW_TOKEN}" style="width:100%;height:100%;border:0"></iframe></div>`;
-}
 
 /* ---------- PROFILE (INRE profile + connections pattern) ---------- */
 /* ---------- USERS (Josh 2026-08-18: "manage users and have them be able to login") ----------
