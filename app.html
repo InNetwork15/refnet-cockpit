@@ -337,7 +337,7 @@ function route() {
   const m = MODULES.find(m => m.match(h)) || MODULES[0];
   // Hiding a tab is presentation, not access control. Someone can type the hash.
   if (m.admin && ME.role !== "admin") { renderShell(); V().innerHTML = `<div class="card"><div class="body"><div class="empty">That page is for admins.</div></div></div>`; return; }
-  clearInterval(window.__msgPoll); window.__msgPoll = null;
+  clearInterval(window.__msgPoll); window.__msgPoll = null; clearInterval(window.__leadPoll); window.__leadPoll = null;
   renderShell(); m.render();
 }
 window.addEventListener("hashchange", route);
@@ -405,7 +405,7 @@ async function viewMessages() {
     <div class="thread" id="thread"><div class="empty" style="padding:20px">Pick a conversation.</div></div></div>`;
   await refreshConvs();
   window.__msgPoll = setInterval(async () => {
-    if (!location.hash.startsWith("#/messages")) { clearInterval(window.__msgPoll); window.__msgPoll = null; return; }
+    if (!location.hash.startsWith("#/messages")) { clearInterval(window.__msgPoll); window.__msgPoll = null; clearInterval(window.__leadPoll); window.__leadPoll = null; return; }
     await refreshConvs(true);
     if (SELCONV) loadThread(SELCONV, true);
   }, 8000);
@@ -1198,6 +1198,16 @@ async function viewLeads() {
     <div class="msgshell"><div class="convlist" id="leadlist">Loading…</div>
     <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a lead.</div></div></div>`;
   drawLChips(); await refreshLeads();
+  // Leads arrive all day and this page never went back for them. The count was computed once at
+  // load, so clicking a chip -- which refetches -- would surface people who had turned up since,
+  // and the queue you were looking at was quietly out of date. Josh: "when i click on home I get
+  // new people's names that should be in here as well." They should, and now they arrive on their
+  // own. The refresh redraws the list only; the lead you have open and your place in it stay put.
+  clearInterval(window.__leadPoll);
+  window.__leadPoll = setInterval(() => {
+    if (!location.hash.startsWith("#/leads")) { clearInterval(window.__leadPoll); window.__leadPoll = null; return; }
+    refreshLeads(true);
+  }, 45000);
 }
 function drawLChips() {
   const opts = [["","All"],["client","Homes"],["vl","VL — vacant land"]];
@@ -1212,8 +1222,9 @@ function drawLChips() {
 window.setLFilter = (k) => { LFILTER = k; LQUEUE = false; drawLChips(); refreshLeads(); };
 window.toggleQueue = () => { LQUEUE = !LQUEUE; drawLChips(); refreshLeads(); };
 
-async function refreshLeads() {
+async function refreshLeads(silent) {
   const q = (document.getElementById("lq")?.value || "").trim();
+  const keepScroll = silent ? (document.getElementById("leadlist")?.scrollTop ?? 0) : 0;
   const d = await lapi("&section=lead_list" + (LFILTER?"&lane="+LFILTER:"") + (q?"&q="+encodeURIComponent(q):""));
   window.__leadsAll = d.leads || [];
   // The queue view hides what has been handled. The full list stays behind "All" -- handled
@@ -1234,6 +1245,7 @@ async function refreshLeads() {
     </div>`).join("") || (LQUEUE
       ? `<div class="empty" style="padding:14px">🎉 Queue is clear — every lead that wants a tour has an agent, a recruiter, or a reason. <a onclick="toggleQueue()" style="color:var(--blue);cursor:pointer">See all leads</a></div>`
       : `<div class="empty" style="padding:14px">No leads match.</div>`);
+  if (silent && keepScroll) el.scrollTop = keepScroll;
 }
 window.openLeadIdx = (i) => { const l = (window.__leads||[])[i]; if (!l) return; LSEL = l; refreshLeads(); loadLead(l.id); };
 /* After assign / recruit / nurture the lead is no longer your move, so it leaves the queue and
