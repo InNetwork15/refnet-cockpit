@@ -774,23 +774,51 @@ const FEEDLABEL = {
 
 /* ---------- AGENTS (partners + recruiting bench) ---------- */
 const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent", active:"lane-client", inactive:"hot" };
+/* ---------- AGENTS (Josh 2026-08-20) ----------
+   "Agents Page Should just be the list of Agents That have showed homes for us as a showing
+   partner and agents that we've referred clients to. So two separate lists."
+
+   Two different relationships, and the page used to blur them into one table that also included
+   every candidate the recruiter had ever texted. A SHOWING partner opens a door for a fee and
+   hands the client back. A REFERRAL partner is given the client outright and we take a fee on
+   their side. Opposite directions of travel; they do not belong in one list.
+
+   Anyone merely contacted lives on Recruiting now. This page is people we have actually done
+   business with, so a name here means something. */
 async function viewAgents() {
-  V().innerHTML = `<h1>Agents</h1><div class="sub">The people who actually show houses for us — terms, agreements, and what they are owed.</div>
-    <div class="card"><h2>🤝 Showing partners</h2><div class="body" id="partners">Loading…</div></div>`;
+  V().innerHTML = `<h1>Agents</h1>
+    <div class="sub">The agents we have actually done business with. Everyone still being courted is on Recruiting.</div>
+    <div class="card"><h2>🏠 Showing partners</h2><div class="body" id="partners">Loading…</div></div>
+    <div class="card"><h2>🤝 Agents we have referred clients to</h2><div class="body" id="referrals">Loading…</div></div>`;
   const d = await api("?section=agents");
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
-  document.getElementById("partners").innerHTML = (d.partners||[]).length ?
-    `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Status</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>` +
-    d.partners.map(p => `<tr>
-      <td><span class="whoName">${esc(p.full_name)}</span>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
-      <td><span class="kind ${PSTATUS[p.status]||""}">${esc(p.status||"?")}</span></td>
-      <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
-      <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
-      <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
-      <td>${p.showings_verified}/${p.showings_total}</td>
-      <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
-      <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
-    : `<div class="empty">No partners yet — recruit someone from the Recruiting page.</div>`;
+  const all = d.partners || [];
+
+  // Earned a place on this page: they showed a house, or they signed terms with us.
+  const showing = all.filter(p => !p.is_team && (p.showings_total > 0 || p.terms_agreed_at));
+  const referral = all.filter(p => p.is_referral_partner);
+
+  document.getElementById("partners").innerHTML = showing.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>`
+      + showing.map(p => `<tr>
+        <td><span class="whoName">${esc(p.full_name)}</span>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
+        <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
+        <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
+        <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
+        <td>${p.showings_verified}/${p.showings_total}</td>
+        <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
+        <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
+    : `<div class="empty">Nobody has shown a house for us yet.</div>`;
+
+  document.getElementById("referrals").innerHTML = referral.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Brokerage</th><th>Contact</th><th>Referral fee</th><th>Notes</th></tr>`
+      + referral.map(p => `<tr>
+        <td><span class="whoName">${esc(p.full_name)}</span></td>
+        <td class="meta">${esc(p.brokerage_name||"—")}</td>
+        <td class="meta">${p.cell_phone?esc(fmtPh(p.cell_phone)):""}${p.email?(p.cell_phone?" · ":"")+esc(p.email):""}${(!p.cell_phone&&!p.email)?'<span class="kind hot">no contact details</span>':""}</td>
+        <td class="meta">${p.referral_fee_pct!=null?esc(p.referral_fee_pct)+"%":'<span class="kind hot">not set</span>'}</td>
+        <td class="meta">${esc(p.referral_notes||"")}</td></tr>`).join("") + `</table></div>`
+    : `<div class="empty">Nobody yet — these are agents we hand a whole client to, not a single showing.</div>`;
 }
 /* ---------- RECRUITING (Josh 2026-08-19: "i want recruiting to be its own page") ----------
    It was a card under Agents. Fine at four candidates, useless at ~490 across 55 towns: every
