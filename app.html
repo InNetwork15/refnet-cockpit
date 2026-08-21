@@ -1337,7 +1337,7 @@ const lapi = (qs, opts) => api("?fn=leads" + qs, opts);
 const LANE_LABEL = { vl: "VL — vacant land", client: "client" };
 async function viewLeads() {
   V().innerHTML = `<h1>Leads</h1>
-    <div class="sub">Every lead, the whole conversation, and why the machine classified them the way it did.</div>
+    <div class="sub">One job on this page: <b>give every lead an agent</b>. The moment somebody takes it, the lead moves to <a href="#/assigned" style="color:var(--blue)">Assigned</a> and carries on from there.</div>
     <div class="zchips" id="lchips"></div>
     <div class="msgshell"><div class="convlist" id="leadlist">Loading…</div>
     <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a lead.</div></div></div>`;
@@ -1357,7 +1357,7 @@ function drawLChips() {
   const opts = [["","All"],["client","Homes"],["vl","VL — vacant land"]];
   const n = (window.__leadsAll||[]).filter(x=>x.needs_decision).length;
   document.getElementById("lchips").innerHTML =
-    `<button class="${LQUEUE?"on":""}" onclick="toggleQueue()" title="Only leads that want a tour and have nobody on them yet">🎯 Needs a decision${n?` <b>${n}</b>`:""}</button>`
+    `<button class="${LQUEUE?"on":""}" onclick="toggleQueue()" title="Leads that want a tour and have nobody on them yet">🎯 Needs an agent${n?` <b>${n}</b>`:""}</button>`
     + opts.map(([k,l]) =>
     `<button class="${!LQUEUE&&LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
     + `<input id="lq" placeholder="Search name, city, address, ZIP…" style="width:260px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
@@ -1387,7 +1387,7 @@ async function refreshLeads(silent) {
       <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
       <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
     </div>`).join("") || (LQUEUE
-      ? `<div class="empty" style="padding:14px">🎉 Queue is clear — every lead that wants a tour has an agent, a recruiter, or a reason. <a onclick="toggleQueue()" style="color:var(--blue);cursor:pointer">See all leads</a></div>`
+      ? `<div class="empty" style="padding:14px">🎉 Queue is clear — everyone who wants a tour has an agent, a recruiter working on it, or a reason to wait. They carry on from <a href="#/assigned" style="color:var(--blue)">Assigned</a>. <a onclick="toggleQueue()" style="color:var(--blue);cursor:pointer">See all leads</a></div>`
       : `<div class="empty" style="padding:14px">No leads match.</div>`);
   if (silent && keepScroll) el.scrollTop = keepScroll;
 }
@@ -1432,9 +1432,8 @@ async function loadLead(id) {
         <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
         <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
         <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openTeamBox()">${d.coverage ? "👥 Reassign" : "👥 Send to a team agent"}</button><button class="btn ghost" style="margin-left:8px" onclick="whoIsFree(${L.lat ?? "null"}, ${L.lng ?? "null"})">🗓️ Who is free?</button><button class="btn ghost" style="margin-left:8px" onclick="recommendAgent('${L.id}')">🤖 Who should take this?</button><button class="btn ghost" style="margin-left:8px" onclick="openReferBox()">🤝 Refer to a partner agent</button><button class="btn ghost" style="margin-left:8px" onclick="openRecruitBox()">🔎 Recruit an outside agent</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture — not ready</button>`}</div>
-      <div id="referbox" style="display:none;margin-top:10px"></div>
-      <div id="teambox" style="display:none;margin-top:10px"></div>
+      <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Not ready yet</button>`}</div>
+      <div id="assignbox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
       ${renderToured(d)}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
@@ -1684,82 +1683,123 @@ window.logShowing = async (showingId, address) => {
     loadLead(window.__lead.lead.id);
   };
 };
-window.closeTeamBox = () => { const b = document.getElementById("teambox"); if (b) b.style.display = "none"; };
 /* REFER THE CLIENT (Josh 2026-08-20: "i want to select Jeffrey Salas and send to John Stanley").
    A different act from assigning a showing, so it gets its own control and its own list. Sending
    a showing keeps the client and rents a door-opener for $50; referring gives the client away and
    earns a fee on the other agent's side. Conflating them would put a $50 payable behind a deal
    where nobody is owed $50. */
-window.openReferBox = async () => {
-  const box = document.getElementById("referbox"); if (!box) return;
-  if (box.style.display === "block") { box.style.display = "none"; return; }
-  box.style.display = "block";
-  box.innerHTML = '<div class="meta">Loading partners…</div>';
-  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"referral_agents" }) });
-  const ags = r.agents || [];
-  if (!ags.length) {
-    box.innerHTML = '<div class="meta">No referral partners on file yet. Add one on the Agents page first.</div>';
-    return;
-  }
-  box.innerHTML = '<div class="meta" style="margin-bottom:6px">We hand the whole client over. No showing fee accrues — we earn a referral fee on their side.</div>'
-    + '<select id="ragent" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
-    + ags.map(function(a){ return '<option value="' + esc(a.id) + '">' + esc(a.full_name)
-        + (a.brokerage_name ? ' — ' + esc(a.brokerage_name) : '')
-        + (a.referral_fee_pct != null ? ' (' + esc(a.referral_fee_pct) + '%)' : ' (fee not set)') + '</option>'; }).join('')
-    + '</select>'
-    + '<input id="rnote" placeholder="Anything they should know? (optional)" style="margin-bottom:8px">'
-    + '<button onclick="submitRefer()">Refer this client</button>'
-    + '<button class="btn ghost" style="margin-left:6px" onclick="document.getElementById(\'referbox\').style.display=\'none\'">Cancel</button>';
-};
-window.submitRefer = async () => {
-  const sel = document.getElementById("ragent");
-  const name = sel.options[sel.selectedIndex].text.split(" — ")[0].split(" (")[0];
-  if (!confirm("Refer " + ((window.__lead && window.__lead.lead && window.__lead.lead.first_name) || "this client") + " to " + name + "?\n\nThey take the relationship from here. Any recruiting we had open for this lead is closed, and no showing fee will accrue.")) return;
-  const r = await lapi("", { method:"POST", body: JSON.stringify({
-    action:"refer_lead", lead_id: window.__lead.lead.id, agent_id: sel.value,
-    note: (document.getElementById("rnote") || {}).value || null, by: (ME && ME.full_name) || "app" }) });
-  if (r.error) { alert("Not referred: " + r.error); return; }
-  document.getElementById("referbox").style.display = "none";
-  afterLeadAction(window.__lead.lead.id);
-};
+/* ---------- ONE DOOR: ASSIGN THIS LEAD (Josh 2026-08-20) ----------
+   "leads need to be its own thing meaning on that page all the leads need to just be assigned to an
+   agent then they move to the assigned page."
 
-window.openTeamBox = async () => {
-  const box = document.getElementById("teambox");
-  if (!box) return;
+   This replaced four buttons -- send to a team agent, refer to a partner, recruit an outside agent,
+   who should take this -- which between them forced you to pick WHAT KIND of person you wanted
+   before the app would show you who was actually available. One list now, everybody who can take
+   the client, sorted nearest-and-least-loaded, with the kind as a label on the row.
+
+   The load number is on every row on purpose: Anthony is carrying eight and Brody two, and without
+   that number the natural thing to do is keep handing work to the name you recognise.
+
+   Bench agents are NOT here. Fifty-odd researched names have signed nothing, and offering them
+   would be offering a promise we cannot keep -- so when the list is thin, the panel says what
+   recruiting actually holds for that town and puts the recruit button right there. */
+let ASEL = null;
+window.openAssignBox = async () => {
+  const box = document.getElementById("assignbox"); if (!box) return;
   if (box.style.display === "block") { box.style.display = "none"; return; }
   box.style.display = "block";
-  box.innerHTML = '<div class="meta">Loading the team…</div>';
-  const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"team_agents" }) });
-  const team = r.team || [];
-  const addrs = (window.__lead && window.__lead.addresses) || [];
-  if (!team.length) {
-    box.innerHTML = '<div class="meta">No team agents on file yet. Add one and they will show here.</div>';
-    return;
-  }
-  box.innerHTML = '<div class="meta" style="margin-bottom:6px">One of our own covers it — no outreach, no agreement, and no showing fee accrues.</div>'
-    + '<select id="tagent" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
-    + team.map(function(t){ return '<option value="' + esc(t.id) + '">' + esc(t.full_name) + (t.email ? ' — ' + esc(t.email) : '') + '</option>'; }).join('')
-    + '</select>'
-    + '<select id="taddr" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px">'
-    + addrs.map(function(a){ return '<option value="' + esc(a) + '">' + esc(a) + '</option>'; }).join('')
-    + '<option value="__manual__">— type a different address —</option></select>'
-    + '<input id="tmanual" placeholder="Street, City" style="display:' + (addrs.length ? 'none' : 'block') + ';margin-bottom:6px">'
-    + '<input id="ttime" placeholder="When? e.g. Fri, Aug 21st 12:30pm (optional)" style="margin-bottom:8px">'
-    + '<button onclick="submitTeamAssign()">Assign</button>'
-    + '<button class="btn ghost" style="margin-left:6px" onclick="closeTeamBox()">Cancel</button>';
-  const sel = document.getElementById("taddr");
-  if (sel) sel.onchange = function(){ document.getElementById("tmanual").style.display = sel.value === "__manual__" ? "block" : "none"; };
+  box.innerHTML = '<div class="meta">Working out who can take this…</div>';
+  const L = (window.__lead && window.__lead.lead) || {};
+  const d = await lapi("", { method: "POST", body: JSON.stringify({ action: "assignable_agents", lead_id: L.id }) });
+  if (d.error) { box.innerHTML = '<div class="meta">' + esc(d.error) + '</div>'; return; }
+  window.__assign = d; ASEL = null;
+  drawAssignBox();
 };
-window.submitTeamAssign = async () => {
-  const sel = document.getElementById("taddr"), manual = document.getElementById("tmanual");
-  const address = (!sel || sel.value === "__manual__") ? (manual && manual.value || "").trim() : sel.value;
-  const agent_id = document.getElementById("tagent").value;
-  const r = await lapi("", { method:"POST", body: JSON.stringify({
-    action:"assign_team_agent", lead_id: window.__lead.lead.id, agent_id,
-    property_address: address, showing_time: (document.getElementById("ttime") || {}).value || null }) });
+const AKIND = {
+  team:     ["our team",          "var(--green)",  "We own the showing. No agreement, no fee."],
+  partner:  ["showing partner",   "#0fb5a6",       "Opens the door for a fee. A payable accrues."],
+  referral: ["referral partner",  "var(--purple)", "Takes the whole client. Referral fee on their side."],
+};
+function drawAssignBox() {
+  const d = window.__assign, box = document.getElementById("assignbox");
+  if (!d || !box) return;
+  const addrs = (window.__lead && window.__lead.addresses) || [];
+  const sel = d.agents.find(a => a.id === ASEL);
+  const b = d.bench;
+
+  const rows = d.agents.map(a => {
+    const [label, colour, blurb] = AKIND[a.kind] || [a.kind, "var(--line)", ""];
+    const on = a.id === ASEL;
+    return `<div onclick="pickAgent('${a.id}')" style="cursor:pointer;border:1px solid ${on ? colour : "var(--line)"};
+        ${on ? "background:#f7fbff;" : ""}border-left:3px solid ${colour};border-radius:10px;padding:8px 11px;margin-bottom:5px">
+      <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+        <span style="font-weight:${on ? 800 : 600}">${on ? "● " : "○ "}${esc(a.name)}</span>
+        <span class="kind" style="background:${colour};color:#fff">${label}</span>
+        ${a.brokerage ? `<span class="meta">${esc(a.brokerage)}</span>` : ""}
+        <span style="flex:1"></span>
+        ${a.miles != null ? `<span class="kind">${a.miles} mi away</span>`
+          : `<span class="kind hot" title="No home address on their profile, so we cannot measure the drive">distance unknown</span>`}
+        <span class="kind" title="Leads they are already carrying">${a.load ? a.load + " on their plate" : "nothing on their plate"}</span>
+        ${a.reachable ? "" : '<span class="kind hot">no phone — cannot be told</span>'}
+      </div>
+      ${on ? `<div class="meta" style="margin-top:3px">${blurb}${a.kind === "referral" && a.referral_fee_pct != null ? ` <b>${a.referral_fee_pct}% referral fee</b>` : ""}${a.kind === "referral" && a.referral_fee_pct == null ? " <b>Referral fee not set on their profile.</b>" : ""}</div>` : ""}
+    </div>`;
+  }).join("");
+
+  box.innerHTML = `
+    <div class="meta" style="margin-bottom:6px">Everyone who can take <b>${esc(d.lead.name)}</b>${d.lead.city ? " in " + esc(d.lead.city) : ""}.
+      Closest first. ${d.lead.located ? "" : "<b>This lead has no coordinates, so no distance is shown.</b>"}</div>
+    ${rows || '<div class="meta" style="margin-bottom:6px">Nobody on file can take a client yet.</div>'}
+    ${sel ? `
+      <select id="aaddr" style="width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:10px;margin:6px 0">
+        ${addrs.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("")}
+        <option value="__manual__">— type a different address —</option></select>
+      <input id="amanual" placeholder="Street, City" style="display:${addrs.length ? "none" : "block"};margin-bottom:6px">
+      ${sel.kind === "referral"
+        ? `<input id="anote" placeholder="Anything ${esc(sel.name.split(" ")[0])} should know? (optional)" style="margin-bottom:8px">`
+        : `<input id="atime" placeholder="When? e.g. Fri, Aug 22nd 12:30pm (optional)" style="margin-bottom:8px">`}
+      <button onclick="submitAssign()">${sel.kind === "referral" ? "🤝 Hand the client to " + esc(sel.name.split(" ")[0]) : "👤 Assign to " + esc(sel.name.split(" ")[0])}</button>
+      <button class="btn ghost" style="margin-left:6px" onclick="document.getElementById('assignbox').style.display='none'">Cancel</button>`
+      : `<div class="meta" style="margin-top:6px">Pick somebody above.</div>`}
+    <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
+      <div class="meta" style="margin-bottom:5px">${b && b.researched
+        ? `Recruiting has <b>${b.researched}</b> researched agent${b.researched === 1 ? "" : "s"} for ${esc(b.town)}, <b>${b.texted}</b> texted so far. They have signed nothing yet, so they cannot be handed a client until they agree.`
+        : b ? `Recruiting has nobody for <b>${esc(b.town)}</b> yet.` : "No town on this lead, so recruiting cannot be aimed."}</div>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="openRecruitBox()">🔎 Recruit an agent</button>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="recommendAgent('${esc(d.lead.id)}')">🤖 Ask the AI who should take it</button>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="whoIsFree(${(window.__lead && window.__lead.lead && window.__lead.lead.lat) ?? "null"}, ${(window.__lead && window.__lead.lead && window.__lead.lead.lng) ?? "null"})">🗓️ Who is free?</button>
+    </div>`;
+  const s = document.getElementById("aaddr");
+  if (s) s.onchange = () => { document.getElementById("amanual").style.display = s.value === "__manual__" ? "block" : "none"; };
+}
+window.pickAgent = (id) => { ASEL = (ASEL === id ? null : id); drawAssignBox(); };
+window.submitAssign = async () => {
+  const d = window.__assign, a = d && d.agents.find(x => x.id === ASEL);
+  if (!a) { alert("Pick an agent first."); return; }
+  const selA = document.getElementById("aaddr"), man = document.getElementById("amanual");
+  const address = (!selA || selA.value === "__manual__") ? ((man && man.value) || "").trim() : selA.value;
+  const first = (window.__lead && window.__lead.lead && window.__lead.lead.first_name) || "this client";
+  // Referring is the one that is hard to walk back -- it gives the relationship away -- so it is
+  // the one that spells out the consequence before you commit.
+  const warn = a.kind === "referral"
+    ? `Hand ${first} to ${a.name}?\n\nThey own the relationship from here. No showing fee accrues to us; a referral fee is owed on their side. Any recruiting we had open closes.`
+    : a.kind === "partner"
+      ? `Assign ${first} to ${a.name}?\n\nThey are an outside showing partner, so a showing fee will accrue on this placement. They get an automatic text.`
+      : `Assign ${first} to ${a.name}?\n\nThey are on our team — no fee accrues. They get an automatic text.`;
+  if (!confirm(warn)) return;
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "assign_lead", lead_id: window.__lead.lead.id, agent_id: a.id,
+    property_address: address || null,
+    showing_time: (document.getElementById("atime") || {}).value || null,
+    note: (document.getElementById("anote") || {}).value || null,
+    by: (ME && ME.full_name) || "app",
+  }) });
   if (r.error) { alert("Not assigned: " + r.error); return; }
-  alert(r.agent + " is now covering it. Any recruiting we had open for this lead is closed.");
-  document.getElementById("teambox").style.display = "none";
+  document.getElementById("assignbox").style.display = "none";
+  alert(r.kind === "referral"
+    ? `${r.agent} now owns this client. A message to ${first} is drafted below for you to read and send — nothing was sent automatically.`
+    : `${r.agent} is covering it and has been texted. It has moved to the Assigned page.`
+      + (r.agent_notified && r.agent_notified !== "sent" ? `\n\nText status: ${r.agent_notified}` : ""));
   afterLeadAction(window.__lead.lead.id);
 };
 window.openRecruitBox = () => {
