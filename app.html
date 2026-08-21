@@ -164,6 +164,7 @@ const MODULES = [
   { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
+  { id:"clients",   nav:"Clients",   match: h => h.startsWith("#/clients"),   render: () => viewClients() },
   { id:"assigned",  nav:"Assigned",  match: h => h.startsWith("#/assigned"),  render: () => viewAssigned() },
   { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
   { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
@@ -999,7 +1000,7 @@ async function drawCommitments() {
         ${g.city ? `<span class="meta">${esc(g.city)}</span>` : ""}
         <span class="kind"${g.past ? ' style="background:#fbe9e8;color:var(--red)"' : ""}>${g.items.length} ${g.items.length === 1 ? "promise" : "promises"}${g.past ? ` · ${g.past} past due` : ""}</span>
         <span style="flex:1"></span>
-        ${g.lead_id ? `<a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/leads" onclick="jumpToLead('${g.lead_id}')">Open lead</a>` : ""}
+        ${g.lead_id ? `<a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/clients" onclick="jumpToLead('${g.lead_id}')">Open lead</a>` : ""}
       </div>
       ${g.items.map(c => `<div style="padding:11px 14px;border-top:1px solid #f0f2f6;border-left:3px solid ${overdue(c) ? "var(--red)" : "transparent"}">
         <div><b>${esc(c.title)}</b></div>
@@ -1248,7 +1249,7 @@ async function drawBoard(silent) {
       + d.uncovered.map(u => `<div class="row" style="border-left:3px solid var(--red);padding-left:10px">
           <div><b>${esc(u.name)}</b> <span class="kind hot">waiting ${wait(u.hours_waiting)}</span></div>
           <div class="meta">${esc(u.property || "(no address)")}${u.price ? " · $" + Number(u.price).toLocaleString() : ""} · ${esc(String(u.intent || "").replace(/_/g, " "))}</div>
-          <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/leads" onclick="jumpToLead('${u.lead_id}')">Open lead → assign or recruit</a></div>
+          <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/clients" onclick="jumpToLead('${u.lead_id}')">Open lead → assign or recruit</a></div>
         </div>`).join("")
     : `<div class="empty">Everyone who wants a tour has someone on it. 🎉</div>`;
 
@@ -1271,7 +1272,7 @@ async function drawBoard(silent) {
         <div><b>${esc(a.name)}</b> → <b>${esc(a.agent)}</b>${a.is_team ? ' <span class="kind">in-house</span>' : ""}
           ${a.has_showing_booked ? '<span class="kind lane-agent">showing booked</span>' : '<span class="kind" style="background:#fdf1dc;color:#8a5a00">no showing booked yet</span>'}</div>
         <div class="meta">${esc(a.property || "")} · assigned ${wait(a.hours_since_assigned)} ago${a.agent_phone ? " · agent " + esc(fmtPh(a.agent_phone)) : ""}</div>
-        <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/leads" onclick="jumpToLead('${a.lead_id}')">Open lead</a></div>
+        <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/clients" onclick="jumpToLead('${a.lead_id}')">Open lead</a></div>
       </div>`).join("")
     : `<div class="empty">Nothing assigned yet.</div>`;
 
@@ -1304,40 +1305,103 @@ function drawFunnelZip() {
         <td class="money ${z.needs_coverage?"zon":""}">${z.needs_coverage}</td><td class="money">${z.covered}</td><td class="money">${z.shown}</td></tr>`).join("")}
       </tbody></table></div>`;
 }
-/* Open a specific lead from anywhere. It used to look only in window.__leads -- the QUEUE-filtered
-   list -- so any lead that had already been handled could not be opened at all: June Bouvrette is
-   assigned to Tony, therefore not in "needs a decision", therefore the lookup missed and you landed
-   on "Pick a lead." Exactly the leads you most want to open from Showings are the ones that have
-   left the queue. Search the full set, drop the filter if that is what it takes to show the row,
-   and open the lead either way. */
+/* Open a specific client from anywhere -- Showings, Offers, Assigned, the pipeline map.
+   It used to land on Leads, which was fine while Leads showed everybody. Now that Leads is strictly
+   the unassigned inbox, the leads you most want to open from those screens -- June Bouvrette,
+   assigned to Tony -- are precisely the ones Leads refuses to list. So it goes to CLIENTS, which
+   holds everyone, clears any stage filter that would hide the row, and opens the record either way. */
 window.jumpToLead = (id) => {
   const go = async () => {
-    await refreshLeads();
-    let l = (window.__leadsAll || []).find(x => x.id === id);
-    if (l && LQUEUE && !l.needs_decision) { LQUEUE = false; await refreshLeads(); }
-    if (l) LSEL = l;
-    drawLChips(); refreshLeads();
-    loadLead(id);   // open it whether or not it appears in the current filter
+    CSTAGEF = "";
+    await refreshClients();
+    const r = (window.__clients || []).find(x => x.lead_id === id);
+    if (r) { CSEL = id; refreshClients(); }
+    loadLead(id);   // open the record whether or not the row is on screen
   };
-  if (location.hash.startsWith("#/leads")) { go(); return; }
-  location.hash = "#/leads";
+  if (location.hash.startsWith("#/clients")) { go(); return; }
+  location.hash = "#/clients";
   setTimeout(go, 300);
 };
 
+/* ---------- CLIENTS: everybody we have, in one place (Josh 2026-08-20) ----------
+   "I need one page called Clients because then all of them can live there and then the leads needs
+   to be only [leads] that have not been assigned."
+
+   Leads is an inbox that empties to zero. This is the book it empties INTO. Nobody vanishes when
+   they get assigned -- they stop being your move and turn up here instead, which is the difference
+   between a queue and a filing cabinet. The two screens read the same derivation on the server, so
+   a client can never be in both.
+
+   Clicking anybody opens the same lead file you get from Leads: one record, one workspace, whatever
+   door you came in through. */
+const CSTAGE = {
+  unassigned:     ["🚨 Needs an agent",   "var(--red)"],
+  recruiting:     ["🤝 Recruiting",       "var(--amber)"],
+  needs_showing:  ["📅 Nothing booked",   "var(--red)"],
+  needs_debrief:  ["📝 Needs a debrief",  "var(--amber)"],
+  decide:         ["🔀 Offer or nurture", "var(--blue)"],
+  booked:         ["📅 Booked",           "var(--blue)"],
+  offer_out:      ["💰 Offer out",        "var(--blue)"],
+  under_contract: ["🏁 Under contract",   "var(--green)"],
+  nurturing:      ["🌱 Nurturing",        "var(--purple)"],
+  referred:       ["🤝 Referred out",     "var(--line)"],
+};
+let CSTAGEF = "", CSEL = null;
+async function viewClients() {
+  V().innerHTML = `<h1>Clients</h1>
+    <div class="sub">Everybody, whatever stage they are at. Leads that still need an agent are also on <a href="#/leads" style="color:var(--blue)">Leads</a>, which is the inbox — this is the book.</div>
+    <div class="zchips" id="cchips"></div>
+    <div class="msgshell"><div class="convlist" id="clientlist">Loading…</div>
+    <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a client.</div></div></div>`;
+  await refreshClients();
+}
+window.setCStage = (k) => { CSTAGEF = k; refreshClients(); };
+async function refreshClients() {
+  const q = (document.getElementById("cq")?.value || "").trim();
+  const d = await lapi("&section=clients" + (CSTAGEF ? "&stage=" + CSTAGEF : "") + (q ? "&q=" + encodeURIComponent(q) : ""));
+  window.__clients = d.rows || [];
+  const c = d.counts || {};
+  document.getElementById("cchips").innerHTML =
+    `<button class="${CSTAGEF === "" ? "on" : ""}" onclick="setCStage('')">All <b>${d.total || 0}</b></button>`
+    + (d.order || []).filter(k => c[k]).map(k =>
+        `<button class="${CSTAGEF === k ? "on" : ""}" onclick="setCStage('${k}')">${(CSTAGE[k] || [k])[0]} <b>${c[k]}</b></button>`).join("")
+    + `<input id="cq" placeholder="Search name, city, address, agent, phone…" style="width:280px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
+        value="${esc(q)}" onkeydown="if(event.key==='Enter')refreshClients()">`;
+
+  const el = document.getElementById("clientlist"); if (!el) return;
+  el.innerHTML = window.__clients.map((r, i) => {
+    const [label, colour] = CSTAGE[r.stage] || [r.stage, "var(--line)"];
+    return `<div class="convrow ${CSEL === r.lead_id ? "sel" : ""}" onclick="openClientIdx(${i})" style="border-left:3px solid ${colour}">
+      <span class="whoName">${esc(r.client)}</span>
+      ${r.lane === "vl" ? `<span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>` : ""}
+      ${r.do_not_contact ? `<span class="kind hot">opted out</span>` : ""}
+      <div style="margin:3px 0 1px"><span class="st" style="border-color:${colour}">${label}</span>
+        ${r.agent ? `<span class="kind lane-agent">${esc(r.agent)}</span>` : ""}
+        ${r.seen ? `<span class="kind">${r.seen} seen</span>` : ""}</div>
+      <div class="meta">${esc(r.address || "—")}${r.city ? ", " + esc(r.city) : ""}${r.zip ? " · " + esc(r.zip) : ""}</div>
+      <div class="meta">${r.price ? "$" + Number(r.price).toLocaleString() : "no price"} · ${r.last_activity ? et(r.last_activity) : "no activity"}</div>
+    </div>`;
+  }).join("") || `<div class="empty" style="padding:14px">Nobody matches.</div>`;
+}
+window.openClientIdx = (i) => {
+  const r = (window.__clients || [])[i]; if (!r) return;
+  CSEL = r.lead_id; refreshClients(); loadLead(r.lead_id);
+};
 /* ---------- LEADS (Josh 2026-08-17) ----------
    The lead file: who they are, every text/call/email in one stream, the call summaries the
    transcriber wrote, and WHY the machine called them a tour request vs a question vs nurture.
    Plus the button that opens recruiting for a chosen property address. */
-// LQUEUE on = show only leads still waiting on a decision (Josh 2026-08-18: "I need this to be a
-// queue that clears out when we take one of the action button steps"). Default ON, because the
-// list's job is the work you have not done. "All" is still one click away.
-let LSEL = null, LFILTER = "", LQUEUE = true;
+// Josh 2026-08-20: "the leads needs to be only [leads] that have not been assigned." There is no
+// longer a toggle to see the handled ones -- that was the page trying to be two things. This list
+// is ONLY what nobody has acted on, so it is allowed to reach zero and mean it. Everybody else,
+// including everybody who used to hide behind the "All" tab, lives on Clients.
+let LSEL = null, LFILTER = "", LQ = "";
 
 const lapi = (qs, opts) => api("?fn=leads" + qs, opts);
 const LANE_LABEL = { vl: "VL — vacant land", client: "client" };
 async function viewLeads() {
   V().innerHTML = `<h1>Leads</h1>
-    <div class="sub">One job on this page: <b>give every lead an agent</b>. The moment somebody takes it, the lead moves to <a href="#/assigned" style="color:var(--blue)">Assigned</a> and carries on from there.</div>
+    <div class="sub">The inbox: leads <b>nobody has acted on yet</b>. Give one an agent and it leaves this page for <a href="#/assigned" style="color:var(--blue)">Assigned</a>. Everyone we have, at every stage, is on <a href="#/clients" style="color:var(--blue)">Clients</a>.</div>
     <div class="zchips" id="lchips"></div>
     <div class="msgshell"><div class="convlist" id="leadlist">Loading…</div>
     <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a lead.</div></div></div>`;
@@ -1355,25 +1419,24 @@ async function viewLeads() {
 }
 function drawLChips() {
   const opts = [["","All"],["client","Homes"],["vl","VL — vacant land"]];
-  const n = (window.__leadsAll||[]).filter(x=>x.needs_decision).length;
+  const n = (window.__leads||[]).length;
   document.getElementById("lchips").innerHTML =
-    `<button class="${LQUEUE?"on":""}" onclick="toggleQueue()" title="Leads that want a tour and have nobody on them yet">🎯 Needs an agent${n?` <b>${n}</b>`:""}</button>`
+    `<span class="kind" style="padding:7px 12px">🎯 ${n} waiting on you</span>`
     + opts.map(([k,l]) =>
-    `<button class="${!LQUEUE&&LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
+    `<button class="${LFILTER===k?"on":""}" onclick="setLFilter('${k}')">${l}</button>`).join("")
     + `<input id="lq" placeholder="Search name, city, address, ZIP…" style="width:260px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
-        onkeydown="if(event.key==='Enter')refreshLeads()">`;
+        value="${esc(LQ)}" onkeydown="if(event.key==='Enter')refreshLeads()">`;
 }
-window.setLFilter = (k) => { LFILTER = k; LQUEUE = false; drawLChips(); refreshLeads(); };
-window.toggleQueue = () => { LQUEUE = !LQUEUE; drawLChips(); refreshLeads(); };
+window.setLFilter = (k) => { LFILTER = k; drawLChips(); refreshLeads(); };
 
 async function refreshLeads(silent) {
-  const q = (document.getElementById("lq")?.value || "").trim();
+  const q = LQ = (document.getElementById("lq")?.value ?? LQ).trim();
   const keepScroll = silent ? (document.getElementById("leadlist")?.scrollTop ?? 0) : 0;
   const d = await lapi("&section=lead_list" + (LFILTER?"&lane="+LFILTER:"") + (q?"&q="+encodeURIComponent(q):""));
   window.__leadsAll = d.leads || [];
-  // The queue view hides what has been handled. The full list stays behind "All" -- handled
-  // leads are not deleted, just not your move any more.
-  window.__leads = LQUEUE ? window.__leadsAll.filter(l => l.needs_decision) : window.__leadsAll;
+  // Unconditional now. A handled lead is not hidden, it has MOVED -- to Assigned if somebody owns
+  // it, and to Clients either way. Nothing is lost by this page refusing to show it.
+  window.__leads = window.__leadsAll.filter(l => l.needs_decision);
   drawLChips();
   const el = document.getElementById("leadlist"); if (!el) return;
   el.innerHTML = window.__leads.map((l, i) => `<div class="convrow ${LSEL&&LSEL.id===l.id?"sel":""}" onclick="openLeadIdx(${i})">
@@ -1386,20 +1449,20 @@ async function refreshLeads(silent) {
         ${l.recruiting_stalled?`<span class="st st-needs" title="A recruiting job exists but nobody has been texted yet — this is still your move">🤝 job open, nobody texted</span>`:""}</div>
       <div class="meta">${esc(l.address||"—")}${l.city?", "+esc(l.city):""}${l.zip?" · "+esc(l.zip):""}</div>
       <div class="meta">${l.price?"$"+Number(l.price).toLocaleString():"no price"} · ${l.last_activity?et(l.last_activity):"no activity"}</div>
-    </div>`).join("") || (LQUEUE
-      ? `<div class="empty" style="padding:14px">🎉 Queue is clear — everyone who wants a tour has an agent, a recruiter working on it, or a reason to wait. They carry on from <a href="#/assigned" style="color:var(--blue)">Assigned</a>. <a onclick="toggleQueue()" style="color:var(--blue);cursor:pointer">See all leads</a></div>`
-      : `<div class="empty" style="padding:14px">No leads match.</div>`);
+    </div>`).join("") || `<div class="empty" style="padding:14px">🎉 Inbox is clear — everyone has an agent, a recruiter working on it, or a reason to wait. They carry on from <a href="#/assigned" style="color:var(--blue)">Assigned</a>, and the whole book is on <a href="#/clients" style="color:var(--blue)">Clients</a>.</div>`;
   if (silent && keepScroll) el.scrollTop = keepScroll;
 }
 window.openLeadIdx = (i) => { const l = (window.__leads||[])[i]; if (!l) return; LSEL = l; refreshLeads(); loadLead(l.id); };
-/* After assign / recruit / nurture the lead is no longer your move, so it leaves the queue and
-   the next one opens. Without this the row stayed put and you had to remember what you had just
-   done -- which is the whole reason a queue beats a list. */
+/* After assign / recruit / nurture the lead is no longer your move, so it drops off the inbox and
+   the next one opens by itself. Without this the row stayed put and you had to remember what you
+   had just done -- which is the whole reason an inbox beats a list.
+   Acting from Clients instead just reloads the record in place: that page is a filing cabinet, and
+   a filing cabinet should not shuffle under your hand. */
 window.afterLeadAction = async (leadId) => {
-  const wasQueue = LQUEUE;
+  if (location.hash.startsWith("#/clients")) { await refreshClients(); loadLead(leadId); return; }
   await refreshLeads();
   const next = (window.__leads || []).filter(l => l.id !== leadId)[0];
-  if (wasQueue && next) { LSEL = next; refreshLeads(); loadLead(next.id); }
+  if (next) { LSEL = next; refreshLeads(); loadLead(next.id); }
   else loadLead(leadId);
 };
 async function loadLead(id) {
@@ -2167,7 +2230,7 @@ async function viewAssigned() {
       <div class="body"><div class="meta" style="margin-bottom:6px">${esc(blurb)}</div>
       ${mine.map(r => `<div class="row" style="border-left:3px solid ${colour};padding-left:10px">
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <a href="#/leads" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600;cursor:pointer">${esc(r.client)}</a>
+          <a href="#/clients" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600;cursor:pointer">${esc(r.client)}</a>
           ${r.agent?`<span class="kind lane-agent">${esc(r.agent)}</span>`:""}
           ${r.seen?`<span class="kind">${r.seen} seen</span>`:""}
           ${r.contract && !r.contract.on_inre?'<span class="st st-needs">⚠ not on INRE yet</span>':""}
@@ -2208,7 +2271,7 @@ async function viewShowings() {
         ${r.has_offer ? `<span class="st st-answered">💰 offer in</span>` : ""}
         <span style="flex:1"></span>
         ${!r.has_offer && (r.happened || r.stage==="verified") ? `<button style="padding:4px 11px;font-size:11.5px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Log an offer</button>` : ""}
-        <a class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:6px;text-decoration:none" href="#/leads" onclick="jumpToLead('${r.lead_id}')">Open lead</a>
+        <a class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:6px;text-decoration:none" href="#/clients" onclick="jumpToLead('${r.lead_id}')">Open lead</a>
       </div>
       <div class="meta">${esc(r.address||"(no address)")}${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
       ${r.feedback?`<div class="meta">Feedback: <i>${esc(r.feedback)}</i></div>`:""}</div>`;
@@ -2340,7 +2403,7 @@ async function viewAgentProfile() {
 
     <div class="card"><h2>🤝 Clients we referred to them</h2><div class="body">${
       (d.referrals || []).length ? (d.referrals).map(r => `<div class="row">
-        <div><a href="#/leads" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600">${esc(r.client)}</a>
+        <div><a href="#/clients" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600">${esc(r.client)}</a>
           <span class="meta"> · ${esc(r.address || "")}${r.city ? ", " + esc(r.city) : ""}${r.price ? " · " + $(r.price) : ""}</span></div>
         <div class="meta">handed over ${et(r.at)}${r.note ? " · " + esc(r.note) : ""}${a.referral_fee_pct != null && r.price ? ` · fee at ${esc(a.referral_fee_pct)}% of their side` : " · " + notSet + " referral fee"}</div>
       </div>`).join("") : `<div class="empty">No clients referred to them yet.</div>`
