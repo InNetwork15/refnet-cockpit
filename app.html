@@ -1120,7 +1120,6 @@ async function viewBoard() {
   V().innerHTML = `<h1>Pipeline</h1>
     <div class="sub">The front of the funnel — who needs an agent right now, and where everything goes next.</div>
     <div id="pflow"></div>
-    <div id="ptiles" class="ztiles"></div>
     <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>`;
   drawFlow();
   await drawBoard();
@@ -1240,11 +1239,13 @@ async function drawBoard(silent) {
   const c = d.counts || {};
   const wait = (h) => h == null ? "" : (h < 1 ? "just now" : h < 48 ? h + "h" : Math.round(h / 24) + "d");
 
-  document.getElementById("ptiles").innerHTML =
-    `<div class="ztile"><span>Nobody on it</span><b style="color:${c.uncovered ? "var(--red)" : "var(--green)"}">${c.uncovered ?? 0}</b><em>want a tour, unassigned</em></div>
-     <div class="ztile"><span>Assigned</span><b>${c.assigned ?? 0}</b><em>someone owns it</em></div>
-     <div class="ztile"><span>Showings booked</span><b>${c.showings ?? 0}</b><em>on the calendar</em></div>
-     <div class="ztile"><span>Not waiting on us</span><b>${c.no_agent_needed ?? 0}</b><em>of ${c.leads_live ?? 0} live — questions & nurture</em></div>`;
+  // The tile row is gone (Josh 2026-08-20, pointing at the flow map: the stages are leads,
+  // assigned, showings, nurture, offers, under contract). These four tiles sat directly above that
+  // map using different words AND different arithmetic for the same ideas -- "Assigned 15" above
+  // "Assigned 7", "Nobody on it 2" above "Leads 38" -- because the tiles counted anyone with an
+  // agent while the map counts the ones with an empty calendar. Both were defensible and together
+  // they were unreadable. The map already IS six live tiles, each a link, in the right vocabulary,
+  // so replacing the row with six more would just be the same numbers twice.
 
   // 1 — nobody on it. The only lane that is an emergency.
   document.getElementById("p1").innerHTML = (d.uncovered || []).length
