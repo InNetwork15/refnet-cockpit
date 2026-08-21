@@ -360,6 +360,7 @@ window.nurtureLead = async (leadId) => {
   alert("Moved to nurture. Any recruiting for them is closed, and a task will bring them back in " + days + " days.");
   if (location.hash.startsWith("#/assigned")) { viewAssigned(); return; }
   if (location.hash.startsWith("#/nurture")) { viewNurture(); return; }
+  if (location.hash.startsWith("#/showings")) { viewShowings(); return; }
   afterLeadAction(leadId);
 };
 window.endNurture = async (leadId) => {
@@ -2307,11 +2308,12 @@ async function viewShowings() {
     <div class="card"><h2>📅 Showings</h2><div class="body" id="slist">Loading…</div></div>`;
   const d = await lapi("&section=showings");
   const rows = d.showings || [], c = d.counts || {};
-  const LBL = { needs_agent:["🚨 no agent yet","st-needs"], booked:["📅 booked","st-waiting"],
+  const LBL = { needs_agent:["🚨 no agent yet","st-needs"], not_booked:["⚠ nothing on the calendar","st-needs"], booked:["📅 booked","st-waiting"],
                 happened:["✅ happened","st-answered"], verified:["✅ verified","st-answered"] };
   document.getElementById("stiles").innerHTML =
       `<div class="ztile"><span>No agent yet</span><b style="color:${c.needs_agent?"var(--red)":"var(--green)"}">${c.needs_agent||0}</b><em>a tour with nobody to show it</em></div>`
-    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>agent assigned</em></div>`
+    + `<div class="ztile"><span>Nothing booked</span><b style="color:${c.not_booked?"var(--amber)":"var(--green)"}">${c.not_booked||0}</b><em>has an agent, no time set</em></div>`
+    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on the calendar</em></div>`
     + `<div class="ztile"><span>Happened</span><b>${c.happened||0}</b><em>awaiting confirmation</em></div>`
     + `<div class="ztile"><span>Verified</span><b style="color:var(--green)">${c.verified||0}</b><em>confirmed by a person</em></div>`;
   document.getElementById("slist").innerHTML = rows.length ? rows.map(r => {
@@ -2323,7 +2325,11 @@ async function viewShowings() {
         ${r.agent ? `<span class="kind ${r.agent_is_team?"lane-agent":""}">${esc(r.agent)}${r.agent_is_team?" (in-house)":""}</span>` : ""}
         ${r.has_offer ? `<span class="st st-answered">💰 offer in</span>` : ""}
         <span style="flex:1"></span>
-        ${!r.has_offer && (r.happened || r.stage==="verified") ? `<button style="padding:4px 11px;font-size:11.5px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Log an offer</button>` : ""}
+        ${(r.stage==="needs_agent"||r.stage==="not_booked") ? `<button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${r.lead_id}')">📅 Book it</button>` : ""}
+        ${r.showing_id && !r.outcome ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="editShowing('${r.showing_id}','${esc(String(r.address||"").replace(/'/g,""))}','${r.scheduled_at||""}',${r.duration_minutes||45})">✏️ Edit</button>` : ""}
+        ${!r.outcome ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="cancelShowing('${r.showing_id||""}','${r.id}','${esc(String(r.client||"").replace(/'/g,""))}')">❌ Cancel</button>` : ""}
+        <button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="nurtureLead('${r.lead_id}')">🌱 Nurture</button>
+        ${!r.has_offer ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Make an offer</button>` : ""}
         <a class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:6px;text-decoration:none" href="#/clients" onclick="jumpToLead('${r.lead_id}')">Open lead</a>
       </div>
       <div class="meta">${esc(r.address||"(no address)")}${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
@@ -2331,6 +2337,63 @@ async function viewShowings() {
   }).join("") : `<div class="empty">No showings booked yet.</div>`;
 }
 
+/* EDIT A BOOKED SHOWING (Josh 2026-08-20: "Edit Showing").
+   Offered when the scheduler shipped and never built, so until now moving a tour meant cancelling
+   and rebooking -- which loses the row and texts the agent as though it were a brand new showing.
+   The agent is told it MOVED, which is a different sentence from "you have a showing" and matters
+   to somebody who may already be driving. */
+window.editShowing = async (showingId, address, at, mins) => {
+  const d = at ? new Date(at) : new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  // the stored time is UTC; the person editing it thinks in Eastern, which is what they booked in
+  const et = new Date(d.toLocaleString("en-US", { timeZone: "America/Detroit" }));
+  const ov = popup(`<h2>✏️ Edit showing</h2><div class="body">
+    <div class="meta" style="margin-bottom:3px">Property</div>
+    <input id="es-addr" value="${esc(address || "")}" style="width:100%;margin-bottom:8px">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><div class="meta" style="margin-bottom:3px">Date</div>
+        <input type="date" id="es-date" value="${et.getFullYear()}-${pad(et.getMonth()+1)}-${pad(et.getDate())}" style="width:170px"></div>
+      <div><div class="meta" style="margin-bottom:3px">Start</div>
+        <input type="time" id="es-time" value="${pad(et.getHours())}:${pad(et.getMinutes())}" style="width:130px"></div>
+      <div><div class="meta" style="margin-bottom:3px">Minutes</div>
+        <input id="es-mins" value="${mins || 45}" style="width:80px"></div>
+    </div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+      <button id="es-go">Save the change</button>
+      <button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Cancel</button>
+      <span class="meta" id="es-msg" style="margin-left:auto"></span>
+    </div></div>`);
+  document.getElementById("es-go").onclick = async () => {
+    const date = document.getElementById("es-date").value, time = document.getElementById("es-time").value;
+    const msg = document.getElementById("es-msg");
+    if (!date || !time) { msg.textContent = "Date and start time are both needed."; return; }
+    document.getElementById("es-go").disabled = true;
+    const r = await lapi("", { method: "POST", body: JSON.stringify({
+      action: "reschedule_showing", showing_id: showingId,
+      property_address: document.getElementById("es-addr").value.trim(),
+      scheduled_at: `${date}T${time}:00-04:00`,
+      duration_minutes: Number(document.getElementById("es-mins").value) || 45 }) });
+    if (r.error) { msg.textContent = r.error; document.getElementById("es-go").disabled = false; return; }
+    ov.remove();
+    alert(`Moved to ${r.when}.` + (r.agent_notified === "sent" ? `\n\n${r.agent} has been texted that it changed.`
+      : r.agent_notified === "no_phone" ? `\n\n⚠ ${r.agent} has no phone on file, so they were NOT told.` : ""));
+    viewShowings();
+  };
+};
+/* CANCEL A SHOWING (Josh 2026-08-20: "Cancel Showing").
+   Deliberately not the same as a no-show. A no-show is the CLIENT failing to turn up, which is
+   feedback about the client; a cancellation is the tour being called off. Merging them would put a
+   black mark on a buyer who did nothing wrong. */
+window.cancelShowing = async (showingId, requestId, client) => {
+  if (!confirm(`Cancel this showing for ${client}?\n\nThe agent is texted that it is off. This is not the same as a no-show — if the client simply did not turn up, log the result instead.`)) return;
+  const reason = prompt("Why? (optional, kept on the record)") || null;
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "cancel_showing", showing_id: showingId || null, request_id: requestId, reason }) });
+  if (r.error) { alert("Not cancelled: " + r.error); return; }
+  alert("Cancelled." + (r.agent_notified === "sent" ? " The agent has been texted."
+    : r.agent_notified === "no_phone" ? "\n\n⚠ The agent has no phone on file, so they were NOT told." : ""));
+  viewShowings();
+};
 /* An accepted offer with no INRE transaction id is an unfinished handoff, not a finished deal.
    The page says so out loud, because that is the moment a referral quietly stops being tracked. */
 /* ---------- NURTURE (Josh 2026-08-20) ----------
