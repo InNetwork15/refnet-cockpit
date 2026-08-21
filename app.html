@@ -358,6 +358,8 @@ window.nurtureLead = async (leadId) => {
     action:"set_nurture", lead_id: leadId, note, check_in_days: days, by: (ME && ME.full_name) || "app" }) });
   if (r.error) { alert("Not saved: " + r.error); return; }
   alert("Moved to nurture. Any recruiting for them is closed, and a task will bring them back in " + days + " days.");
+  if (location.hash.startsWith("#/assigned")) { viewAssigned(); return; }
+  if (location.hash.startsWith("#/nurture")) { viewNurture(); return; }
   afterLeadAction(leadId);
 };
 window.endNurture = async (leadId) => {
@@ -1119,6 +1121,7 @@ async function viewBoard() {
   // a map of where everything goes next, which is the whole job of this page.
   V().innerHTML = `<h1>Pipeline</h1>
     <div class="sub">The front of the funnel — who needs an agent right now, and where everything goes next.</div>
+    <div id="pattn"></div>
     <div id="pflow"></div>
     <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>`;
   drawFlow();
@@ -1165,7 +1168,7 @@ async function drawFlow() {
   const arrow = (t) => `<div style="align-self:center;color:var(--muted,#8a93a2);font-size:13px;padding:0 1px;white-space:nowrap">${t}</div>`;
 
   el.innerHTML = `<div class="card" style="background:#fbfcfe"><div class="body">
-    <div class="meta" style="margin-bottom:7px"><b>How a lead moves</b> — every number is live, every box is a link</div>
+    <div class="meta" style="margin-bottom:8px"><b>How a lead moves</b></div>
     <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:stretch">
       ${step("📥", "Leads", leadsN, "#/leads", leadsN > 0, "need an agent")}
       ${arrow("→")}
@@ -1180,22 +1183,45 @@ async function drawFlow() {
       ${step("🏁", "Under contract", c.under_contract_open ?? 0, "#/contract", (c.under_contract_open ?? 0) > 0, "needs the INRE handoff")}
       ${arrow("→")}
       ${step("✅", "Closed", c.closed ?? 0, "#/contract", false, "tracked on INRE")}
-    </div>
-    <div class="meta" style="margin-top:9px;line-height:1.7">
-      <b>Nurture is the junction, not a siding.</b> A showing that does not land goes back to nurture;
-      an offer that does not land goes back to nurture; a contract that falls through goes back to nurture.
-      From nurture the job is always the same — get them into another showing.
-      ${(k.needs_debrief ?? 0) > 0 ? `<br><b style="color:var(--amber)">⚠ ${k.needs_debrief} shown but never debriefed</b> — until somebody logs what they thought, they cannot move to an offer or back to nurture. They are stuck. <a href="#/assigned" style="color:var(--blue)">Clear them</a>.` : ""}
-      ${(k.referred ?? 0) > 0 ? `<br>🤝 <b>${k.referred} referred out</b> — the other way a client leaves the loop: another agent owns the relationship.` : ""}
-      <br><span style="font-size:11px">The final close happens on the INRE platform after handoff, so RefNet counts what it has handed over rather than claiming to know the closing date.</span>
+      ${(k.referred ?? 0) > 0 ? arrow("↘") + step("🤝", "Referred out", k.referred, "#/clients", false, "another agent owns it") : ""}
     </div>
   </div></div>`;
+}
+/* NEEDS ATTENTION (Josh 2026-08-20) ----------
+   "we can put some alerts or other high level data we need to be drawn to. i do like the 5 shown
+   but never debriefed."
+
+   Everything here is a silent failure: it costs money or momentum, it is nobody's obvious job, and
+   every other screen renders it as progress. A count, a short phrase, a link -- no sentences, no
+   explanations. If the strip is empty, nothing is quietly rotting, and that is worth seeing too. */
+function drawAttention(items) {
+  const el = document.getElementById("pattn"); if (!el) return;
+  if (!items || !items.length) {
+    el.innerHTML = `<div class="card" style="background:#f2fbf7;border-color:#c3e8d5"><div class="body" style="padding:11px 14px">
+      <span style="color:var(--green);font-weight:700">✓ Nothing needs attention</span>
+      <span class="meta"> — no stuck debriefs, no empty calendars, no overdue check-backs.</span></div></div>`;
+    return;
+  }
+  const tone = { red: ["#fdecea", "#f2c4bd", "var(--red)"], amber: ["#fffaf1", "#f0dfae", "var(--amber)"] };
+  el.innerHTML = `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">`
+    + items.map(a => {
+        const [bg, br, fg] = tone[a.tone] || tone.amber;
+        return `<a href="${a.href}" style="flex:1 1 190px;text-decoration:none;background:${bg};border:1px solid ${br};border-radius:12px;padding:10px 13px;display:block">
+          <div style="display:flex;align-items:baseline;gap:7px">
+            <span style="font-size:24px;font-weight:800;color:${fg};line-height:1">${a.n}</span>
+            <span style="font-weight:600;font-size:13px;color:#2a2f3a">${esc(a.label)}</span>
+          </div>
+          ${a.why ? `<div class="meta" style="font-size:11px;margin-top:3px">${esc(a.why)}</div>` : ""}
+        </a>`;
+      }).join("")
+    + `</div>`;
 }
 async function drawBoard(silent) {
   const d = await lapi("&section=pipeline");
   if (!document.getElementById("p1")) return;
   const c = d.counts || {};
   const wait = (h) => h == null ? "" : (h < 1 ? "just now" : h < 48 ? h + "h" : Math.round(h / 24) + "d");
+  drawAttention(d.attention);
 
   // The tile row is gone (Josh 2026-08-20, pointing at the flow map: the stages are leads,
   // assigned, showings, nurture, offers, under contract). These four tiles sat directly above that
@@ -1568,6 +1594,16 @@ function renderToured(d) {
    "1212 & 1310 Vance Rd", which is two properties, so the row is editable and removable rather
    than assumed correct. Each row books its own showing, and the agent is told once per booking. */
 window.scheduleShowing = async (leadId) => {
+  // Josh: "if i click book a showing this should pop up not take me to another page." It always WAS
+  // a popup -- it just could not be opened anywhere except the lead file, because it read the
+  // client's address and covering agent out of window.__lead, which only that page fills in. So the
+  // button on Assigned had to walk you there first. It fetches the record itself now, which makes
+  // it callable from any screen that knows a lead id.
+  if (!window.__lead || !window.__lead.lead || window.__lead.lead.id !== leadId) {
+    const d = await lapi("&section=lead&id=" + encodeURIComponent(leadId));
+    if (d.error) { alert("Could not open that client: " + d.error); return; }
+    window.__lead = d;
+  }
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"team_agents" }) });
   const team = r.team || [];
   if (!team.length) { alert("No team agents on file. Add one on the Agents page first."); return; }
@@ -1649,6 +1685,10 @@ window.scheduleShowing = async (leadId) => {
       + (bad.length ? `\n\nNot booked:\n` + bad.map(b => `• ${b.address} at ${b.time} — ${b.err}`).join("\n") : "")
       + (noPhone ? `\n\n⚠ ${agentName} has NO phone number on file, so they were not told. Add one on their profile.`
                  : told ? `\n\n${agentName} has been texted.` : ""));
+    // Repaint whatever page you were actually on, rather than assuming the lead file.
+    if (location.hash.startsWith("#/assigned")) { viewAssigned(); return; }
+    if (location.hash.startsWith("#/showings")) { viewShowings(); return; }
+    if (location.hash.startsWith("#/board") || location.hash === "#/" || location.hash === "") { viewBoard(); return; }
     loadLead(leadId);
   };
 };
@@ -1666,6 +1706,15 @@ window.scheduleShowing = async (leadId) => {
    No-show and cancelled are first-class, and deliberately do NOT ask what they thought of the
    house: a buyer who never turned up did not dislike it, and recording that as "passed" would
    poison the matching data later. */
+window.logShowingFor = async (leadId, showingId) => {
+  if (!window.__lead || !window.__lead.lead || window.__lead.lead.id !== leadId) {
+    const d = await lapi("&section=lead&id=" + encodeURIComponent(leadId));
+    if (d.error) { alert("Could not open that client: " + d.error); return; }
+    window.__lead = d;
+  }
+  const t = (window.__lead.toured || []).find(x => x.id === showingId);
+  return logShowing(showingId, t ? t.property_address : "");
+};
 window.logShowing = async (showingId, address) => {
   const t = ((window.__lead && window.__lead.toured) || []).find(x => x.id === showingId) || {};
   const L = (window.__lead && window.__lead.lead) || {};
@@ -2238,8 +2287,9 @@ async function viewAssigned() {
           ${r.seen?`<span class="kind">${r.seen} seen</span>`:""}
           ${r.contract && !r.contract.on_inre?'<span class="st st-needs">⚠ not on INRE yet</span>':""}
           <span style="flex:1"></span>
-          ${stage==="needs_showing"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">📅 Book a showing</button>`:""}
-          ${stage==="needs_debrief"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">📝 Log the result</button>`:""}
+          ${stage==="needs_showing"?`<button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${r.lead_id}')">📅 Book a showing</button>`
+            + `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="nurtureLead('${r.lead_id}')">🌱 Nurture</button>`:""}
+          ${stage==="needs_debrief"&&r.debrief?`<button style="padding:4px 11px;font-size:11.5px" onclick="logShowingFor('${r.lead_id}','${r.debrief.id}')">📝 Log the result</button>`:""}
           ${stage==="decide"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">Offer or nurture</button>`:""}
         </div>
         <div class="meta">${esc(r.address||"")}${r.city?", "+esc(r.city):""}${r.price?" · "+$(r.price):""}</div>
