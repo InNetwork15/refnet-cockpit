@@ -162,12 +162,14 @@ const MODULES = [
   // duplicate of Newest Leads, and a live feed that repainted every ten seconds. Pipeline
   // answers the same question (what is happening, whose hands is it in) with the actual work.
   { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
-  { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"clients",   nav:"Clients",   match: h => h.startsWith("#/clients"),   render: () => viewClients() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"assigned",  nav:"Assigned",  match: h => h.startsWith("#/assigned"),  render: () => viewAssigned() },
   { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
+  { id:"nurture",   nav:"Nurture",   match: h => h.startsWith("#/nurture"),   render: () => viewNurture() },
   { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
+  { id:"contract",  nav:"Under contract", match: h => h.startsWith("#/contract"), render: () => viewContract() },
+  { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
   // Josh 2026-08-20: "we can hide the email page for now." nav:null hides the tab without
   // deleting the desk -- the route, the Gmail connection and every synced message stay exactly
@@ -372,6 +374,7 @@ window.endNurture = async (leadId) => {
   if (!confirm("Put this lead back into the active pipeline?")) return;
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"end_nurture", lead_id: leadId }) });
   if (r.error) { alert("Not changed: " + r.error); return; }
+  if (location.hash.startsWith("#/nurture")) { viewNurture(); return; }
   afterLeadAction(leadId);
 };
 /* ---------- RECORD AN OFFER (Josh 2026-08-18) ----------
@@ -1217,16 +1220,18 @@ async function drawFlow() {
   el.innerHTML = `<div class="card" style="background:#fbfcfe"><div class="body">
     <div class="meta" style="margin-bottom:7px"><b>How a lead moves</b> — every number is live, every box is a link</div>
     <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:stretch">
-      ${step("📥","Leads", c.uncovered ?? 0, "#/leads", (c.uncovered ?? 0) > 0, "need an agent")}
+      ${step("📥","Leads", (c.uncovered ?? 0) + (c.also_waiting ?? 0), "#/leads", ((c.uncovered ?? 0) + (c.also_waiting ?? 0)) > 0, "need an agent")}
       ${step("👤","Assigned", k.needs_showing ?? 0, "#/assigned", (k.needs_showing ?? 0) > 0, "nothing booked yet")}
       ${step("📅","Showings", k.booked ?? 0, "#/showings", false, "on the calendar")}
-      ${step("📝","Debrief", k.needs_debrief ?? 0, "#/assigned", (k.needs_debrief ?? 0) > 0, "shown, not logged")}
+      ${step("🌱","Nurture", k.nurturing ?? 0, "#/nurture", false, "not ready yet")}
       ${step("💰","Offers", k.offer_out ?? 0, "#/offers", false, "waiting on an answer")}
-      ${step("🏁","Under contract", k.under_contract ?? 0, "#/offers", false, "hand to INRE")}
+      ${step("🏁","Under contract", k.under_contract ?? 0, "#/contract", false, "hand to INRE")}
     </div>
     <div class="meta" style="margin-top:8px">
-      A tour that does not land goes to <b>🌱 nurture</b> (${k.nurturing ?? 0}) and can come back to a showing at any time.
-      A client we hand over entirely is <b>🤝 referred out</b> (${k.referred ?? 0}). Amber means someone here is holding it up.
+      Nurture is not a dead end — anyone resting can go back to a showing the moment they are ready.
+      ${(k.needs_debrief ?? 0) > 0 ? `<b style="color:var(--amber)">${k.needs_debrief} shown but never debriefed</b> — that is the gap between Showings and what comes next, and it sits on <a href="#/assigned" style="color:var(--blue)">Assigned</a>. ` : ""}
+      ${(k.referred ?? 0) > 0 ? `<b>🤝 ${k.referred} referred out</b> — another agent owns those.` : ""}
+      Amber means somebody here is holding it up.
     </div>
   </div></div>`;
 }
@@ -2270,18 +2275,94 @@ async function viewShowings() {
 
 /* An accepted offer with no INRE transaction id is an unfinished handoff, not a finished deal.
    The page says so out loud, because that is the moment a referral quietly stops being tracked. */
+/* ---------- NURTURE (Josh 2026-08-20) ----------
+   A stage on the nav because it is a stage of the business, not a bin. Every row here is a promise:
+   we told somebody we would come back to them on a date. So the page is ordered by whether that
+   date has passed, not by name -- an overdue check-back is the only thing on it that is actually
+   work, and left unsorted it looks identical to the twenty that are resting quietly.
+   Bringing somebody back to active is one click, because the whole point of parking a client is
+   that un-parking them should be trivial. */
+async function viewNurture() {
+  V().innerHTML = `<h1>Nurture</h1>
+    <div class="sub">Clients who are not ready yet, and the date we promised ourselves we would check back.</div>
+    <div id="ntiles" class="ztiles"></div>
+    <div class="card"><h2>🌱 Resting</h2><div class="body" id="nlist">Loading…</div></div>`;
+  const d = await lapi("&section=clients&stage=nurturing");
+  const rows = (d.rows || []).slice().sort((a, b) => {
+    const ao = a.nurture?.overdue ? 0 : 1, bo = b.nurture?.overdue ? 0 : 1;
+    if (ao !== bo) return ao - bo;
+    return new Date(a.nurture?.check_at || a.nurture?.since || 0) - new Date(b.nurture?.check_at || b.nurture?.since || 0);
+  });
+  const due = rows.filter(r => r.nurture?.overdue).length;
+  const undated = rows.filter(r => !r.nurture?.check_at).length;
+  document.getElementById("ntiles").innerHTML =
+      `<div class="ztile"><span>Resting</span><b>${rows.length}</b><em>not ready yet</em></div>`
+    + `<div class="ztile"><span>Check back due</span><b style="color:${due ? "var(--amber)" : "var(--green)"}">${due}</b><em>the date has passed</em></div>`
+    + `<div class="ztile"><span>No date set</span><b style="color:${undated ? "var(--amber)" : "var(--green)"}">${undated}</b><em>nothing will bring them back</em></div>`;
+
+  document.getElementById("nlist").innerHTML = rows.length ? rows.map(r => `
+    <div class="row" style="border-left:3px solid ${r.nurture?.overdue ? "var(--amber)" : "var(--purple)"};padding-left:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a href="#/clients" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600;cursor:pointer">${esc(r.client)}</a>
+        ${r.nurture?.overdue ? '<span class="st st-needs">⏰ check back was due</span>' : ""}
+        ${!r.nurture?.check_at ? '<span class="st st-needs">no check-back date</span>' : ""}
+        ${r.agent ? `<span class="kind lane-agent">${esc(r.agent)}</span>` : ""}
+        <span style="flex:1"></span>
+        <button style="padding:4px 11px;font-size:11.5px" onclick="endNurture('${r.lead_id}')">Back to active</button>
+      </div>
+      <div class="meta">${esc(r.address || "")}${r.city ? ", " + esc(r.city) : ""}${r.price ? " · $" + Number(r.price).toLocaleString() : ""}</div>
+      <div class="meta">Parked ${r.nurture?.since ? et(r.nurture.since) : "—"}${r.nurture?.by ? " by " + esc(r.nurture.by) : ""}${r.nurture?.check_at ? " · checking back " + et(r.nurture.check_at) : ""}</div>
+      ${r.nurture?.note ? `<div class="meta">“${esc(r.nurture.note)}”</div>` : ""}
+    </div>`).join("")
+    : `<div class="empty">Nobody is resting. Everyone we have is either being worked or has moved on.</div>`;
+}
+
+/* ---------- UNDER CONTRACT (Josh 2026-08-20) ----------
+   The end of OUR pipeline and the start of the INRE platform's. That handover is the only thing
+   this page is really about: an accepted offer that never got recorded as an INRE transaction is a
+   deal we are no longer tracking anywhere, which is the most expensive way to lose one. So the
+   un-handed-off ones sort to the top and stay amber until somebody records the transaction. */
+async function viewContract() {
+  V().innerHTML = `<h1>Under contract</h1>
+    <div class="sub">Accepted offers. Each one needs to land on the INRE platform — that is where the transaction actually gets worked.</div>
+    <div id="ktiles" class="ztiles"></div>
+    <div class="card"><h2>🏁 Accepted</h2><div class="body" id="klist">Loading…</div></div>`;
+  const d = await lapi("&section=offers");
+  const rows = (d.offers || []).filter(o => o.status === "accepted")
+    .sort((a, b) => (b.awaiting_handoff ? 1 : 0) - (a.awaiting_handoff ? 1 : 0));
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  const waiting = rows.filter(o => o.awaiting_handoff).length;
+  const volume = rows.reduce((s, o) => s + Number(o.offer_price || 0), 0);
+  document.getElementById("ktiles").innerHTML =
+      `<div class="ztile"><span>Under contract</span><b style="color:var(--green)">${rows.length}</b><em>accepted offers</em></div>`
+    + `<div class="ztile"><span>Not on INRE yet</span><b style="color:${waiting ? "var(--amber)" : "var(--green)"}">${waiting}</b><em>needs a transaction recorded</em></div>`
+    + `<div class="ztile"><span>Contract volume</span><b>${$(volume)}</b><em>total accepted price</em></div>`;
+
+  document.getElementById("klist").innerHTML = rows.length ? rows.map(o => `
+    <div class="row" style="border-left:3px solid ${o.awaiting_handoff ? "var(--amber)" : "var(--green)"};padding-left:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a href="#/clients" onclick="jumpToLead('${o.lead_id}')" style="color:var(--blue);font-weight:600;cursor:pointer">${esc(o.client)}</a>
+        <b>${$(o.offer_price)}</b>${o.list_price ? `<span class="meta">asking ${$(o.list_price)}</span>` : ""}
+        ${o.awaiting_handoff ? '<span class="st st-needs">⚠ not on INRE yet</span>' : ""}
+        ${o.inre_transaction_id ? `<span class="kind lane-agent">INRE ${esc(o.inre_transaction_id)}</span>` : ""}
+      </div>
+      <div class="meta">${esc(o.address || "")}${o.agent ? " · " + esc(o.agent) : ""} · accepted ${et(o.offered_at)}</div>
+      ${o.awaiting_handoff ? `<div style="margin-top:6px"><button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button></div>` : ""}
+    </div>`).join("")
+    : `<div class="empty">Nothing is under contract yet. Accepted offers land here from <a href="#/offers" style="color:var(--blue)">Offers</a>.</div>`;
+}
+
 async function viewOffers() {
   V().innerHTML = `<h1>Offers</h1>
-    <div class="sub">Offers we have put in, and the ones that became deals on the INRE platform.</div>
+    <div class="sub">Offers still in play, and the ones that did not land. Accepted offers move to <a href="#/contract" style="color:var(--blue)">Under contract</a>.</div>
     <div id="otiles" class="ztiles"></div>
     <div class="card"><h2>💰 Offers</h2><div class="body" id="olist">Loading…</div></div>`;
   const d = await lapi("&section=offers");
-  const rows = d.offers || [], c = d.counts || {};
+  const rows = (d.offers || []).filter(o => o.status !== "accepted"), c = d.counts || {};
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
   document.getElementById("otiles").innerHTML =
       `<div class="ztile"><span>Out now</span><b>${c.submitted||0}</b><em>waiting on an answer</em></div>`
-    + `<div class="ztile"><span>Accepted</span><b style="color:var(--green)">${c.accepted||0}</b><em>under contract</em></div>`
-    + `<div class="ztile"><span>Owed to INRE</span><b style="color:${c.awaiting_handoff?"var(--amber)":"var(--green)"}">${c.awaiting_handoff||0}</b><em>accepted, not handed off</em></div>`
+    + `<div class="ztile"><span>Accepted</span><b style="color:var(--green)">${c.accepted||0}</b><em>now on <a href="#/contract" style="color:var(--blue)">Under contract</a></em></div>`
     + `<div class="ztile"><span>Did not land</span><b>${c.lost||0}</b><em>rejected or withdrawn</em></div>`;
   document.getElementById("olist").innerHTML = rows.length ? rows.map(o => `
     <div class="row" style="border-left:3px solid ${o.awaiting_handoff?"var(--amber)":o.status==="accepted"?"var(--green)":o.status==="submitted"?"var(--blue)":"var(--line)"};padding-left:10px">
@@ -2300,7 +2381,7 @@ async function viewOffers() {
           <button class="btn ghost" style="margin-left:6px" onclick="settleOffer('${o.id}','withdrawn')">Withdrawn</button>`:""}
         ${o.awaiting_handoff?`<button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button>`:""}
       </div></div>`).join("")
-    : `<div class="empty">No offers yet. Log one from a showing that has happened.</div>`;
+    : `<div class="empty">No live offers. Log one from a showing that has happened.</div>`;
 }
 window.newOffer = async (leadId, address) => {
   const raw = prompt("What did we offer on " + address + "?\n\nEnter the amount in dollars.");
@@ -2321,7 +2402,13 @@ window.settleOffer = async (id, status) => {
   } else if (!confirm("Mark this offer " + status + "?")) return;
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"set_offer_status", offer_id:id, status, accepted_price }) });
   if (r.error) { alert("Not changed: " + r.error); return; }
-  if (status === "accepted") alert("Under contract.\n\nNext: create the transaction on the INRE platform, then record its id here so the two systems agree.");
+  // Accepting now MOVES the offer off this page, so say where it went rather than leaving somebody
+  // hunting for a row that vanished.
+  if (status === "accepted") {
+    alert("Under contract — it has moved to the Under contract page.\n\nNext: create the transaction on the INRE platform, then record its id there so the two systems agree.");
+    location.hash = "#/contract";
+    return;
+  }
   viewOffers();
 };
 window.handOff = async (id) => {
@@ -2329,6 +2416,7 @@ window.handOff = async (id) => {
   if (!t || !t.trim()) return;
   const r = await lapi("", { method:"POST", body: JSON.stringify({ action:"hand_off_offer", offer_id:id, inre_transaction_id:t.trim() }) });
   if (r.error) { alert("Not recorded: " + r.error); return; }
+  if (location.hash.startsWith("#/contract")) { viewContract(); return; }
   viewOffers();
 };
 /* ---------- ONE AGENT (Josh 2026-08-20) ----------
