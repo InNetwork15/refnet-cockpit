@@ -2255,17 +2255,13 @@ const ASTAGE = {
 };
 async function viewAssigned() {
   V().innerHTML = `<h1>Assigned</h1>
-    <div class="sub">Somebody owns these and nothing is on the calendar yet. Once a tour is booked they move to <a href="#/showings" style="color:var(--blue)">Showings</a>.</div>
-    <div id="atiles" class="ztiles"></div><div id="alist">Loading…</div>`;
+    <div class="sub">Somebody owns these and nothing is on the calendar yet. Book a showing and they move to <a href="#/showings" style="color:var(--blue)">Showings</a>; nurture them and they move to <a href="#/nurture" style="color:var(--blue)">Nurture</a>.
+      <b>After 48 hours with nothing booked they go to Nurture on their own</b> — nobody is messaged, and it is one click back.</div>
+    <div id="alist">Loading…</div>`;
   const d = await lapi("&section=assigned");
   const rows = d.rows || [], c = d.counts || {};
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
 
-  document.getElementById("atiles").innerHTML =
-      `<div class="ztile"><span>Nothing booked</span><b style="color:${c.needs_showing?"var(--red)":"var(--green)"}">${c.needs_showing||0}</b><em>has an agent, empty calendar</em></div>`
-    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on <a href="#/showings" style="color:var(--blue)">Showings</a></em></div>`
-    + `<div class="ztile"><span>Resting</span><b>${c.nurturing||0}</b><em>on <a href="#/nurture" style="color:var(--blue)">Nurture</a></em></div>`
-    + `<div class="ztile"><span>Offers / contract</span><b>${(c.offer_out||0)+(c.under_contract||0)}</b><em>${c.offer_out||0} out · ${c.under_contract||0} accepted</em></div>`;
 
   document.getElementById("alist").innerHTML = (d.order || []).map(stage => {
     const mine = rows.filter(r => r.stage === stage);
