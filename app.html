@@ -164,6 +164,7 @@ const MODULES = [
   { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
+  { id:"assigned",  nav:"Assigned",  match: h => h.startsWith("#/assigned"),  render: () => viewAssigned() },
   { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
   { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
   { id:"messages",  nav:"Messages",  match: h => h.startsWith("#/messages"),  render: () => viewMessages() },
@@ -1976,6 +1977,69 @@ function showSecret(title, pw, email) {
 
    A showing's truth is split across two tables -- the request knows who is covering it, the
    showings row knows whether it happened -- so both are read and reconciled on the address. */
+/* ---------- ASSIGNED (Josh 2026-08-20) ----------
+   "leads come in and then they need to get assigned. Once assigned we need to have showings
+   scheduled once showings are complete we need to get those to nurture or offer and from offer they
+   get under contract or back to nurture going back to showing."
+
+   Leads holds the front of the funnel -- nobody owns it yet. This page is everything after
+   somebody does, and it is ordered by WHO IS WAITING ON US rather than by how far along the deal
+   is: seven leads have an agent and nothing on the calendar, and five were shown days ago and never
+   debriefed. Both are silent failures, because in every other view they read as progress.
+
+   The stage is derived from the facts, never stored, so it cannot drift out of step with the
+   showings and offers it describes. Nothing here is a dead end except under contract and referred
+   out -- a passed showing goes back to nurture or straight to another booking, which is the loop
+   Josh described. */
+const ASTAGE = {
+  needs_showing:  ["🚨 Assigned — nothing booked", "var(--red)",   "They have an agent and an empty calendar."],
+  needs_debrief:  ["📝 Shown — needs a debrief",   "var(--amber)", "The tour has been and gone. What did they think?"],
+  decide:         ["🔀 Seen it — offer or nurture","var(--blue)",  "They have viewed something. Next move is yours."],
+  booked:         ["📅 Showing booked",            "var(--line)",  "On the calendar, nothing to do."],
+  offer_out:      ["💰 Offer out",                 "var(--blue)",  "Waiting on an answer."],
+  under_contract: ["🏁 Under contract",            "var(--green)", "Hand it to the INRE platform."],
+  nurturing:      ["🌱 Nurturing",                 "var(--purple)","Not ready; will resurface."],
+  referred:       ["🤝 Referred out",              "var(--line)",  "Another agent owns the relationship."],
+};
+async function viewAssigned() {
+  V().innerHTML = `<h1>Assigned</h1>
+    <div class="sub">Every lead somebody owns, and what it is waiting on. Leads that still need an agent are on the Leads page.</div>
+    <div id="atiles" class="ztiles"></div><div id="alist">Loading…</div>`;
+  const d = await lapi("&section=assigned");
+  const rows = d.rows || [], c = d.counts || {};
+  const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
+
+  document.getElementById("atiles").innerHTML =
+      `<div class="ztile"><span>Nothing booked</span><b style="color:${c.needs_showing?"var(--red)":"var(--green)"}">${c.needs_showing||0}</b><em>has an agent, empty calendar</em></div>`
+    + `<div class="ztile"><span>Needs a debrief</span><b style="color:${c.needs_debrief?"var(--amber)":"var(--green)"}">${c.needs_debrief||0}</b><em>shown, never logged</em></div>`
+    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on the calendar</em></div>`
+    + `<div class="ztile"><span>Offers / contract</span><b>${(c.offer_out||0)+(c.under_contract||0)}</b><em>${c.offer_out||0} out · ${c.under_contract||0} accepted</em></div>`;
+
+  document.getElementById("alist").innerHTML = (d.order || []).map(stage => {
+    const mine = rows.filter(r => r.stage === stage);
+    if (!mine.length) return "";
+    const [label, colour, blurb] = ASTAGE[stage] || [stage, "var(--line)", ""];
+    return `<div class="card"><h2>${label} <span class="badge">${mine.length}</span></h2>
+      <div class="body"><div class="meta" style="margin-bottom:6px">${esc(blurb)}</div>
+      ${mine.map(r => `<div class="row" style="border-left:3px solid ${colour};padding-left:10px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <a href="#/leads" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);font-weight:600;cursor:pointer">${esc(r.client)}</a>
+          ${r.agent?`<span class="kind lane-agent">${esc(r.agent)}</span>`:""}
+          ${r.seen?`<span class="kind">${r.seen} seen</span>`:""}
+          ${r.contract && !r.contract.on_inre?'<span class="st st-needs">⚠ not on INRE yet</span>':""}
+          <span style="flex:1"></span>
+          ${stage==="needs_showing"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">📅 Book a showing</button>`:""}
+          ${stage==="needs_debrief"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">📝 Log the result</button>`:""}
+          ${stage==="decide"?`<button style="padding:4px 11px;font-size:11.5px" onclick="jumpToLead('${r.lead_id}')">Offer or nurture</button>`:""}
+        </div>
+        <div class="meta">${esc(r.address||"")}${r.city?", "+esc(r.city):""}${r.price?" · "+$(r.price):""}</div>
+        ${r.next_showing?`<div class="meta">Next: ${esc(r.next_showing.address||"")} · ${et(r.next_showing.at)}</div>`:""}
+        ${r.debrief?`<div class="meta">Waiting on: ${esc(r.debrief.address||"")} · ${et(r.debrief.at)}</div>`:""}
+        ${r.last_outcome?`<div class="meta">Last: ${esc(r.last_seen||"")} — ${esc(String(r.last_outcome).replace(/_/g," "))}</div>`:""}
+        ${r.offer?`<div class="meta">Offer ${$(r.offer.price)} on ${esc(r.offer.address||"")}</div>`:""}
+      </div>`).join("")}</div></div>`;
+  }).join("") || `<div class="card"><div class="body"><div class="empty">Nothing is assigned yet.</div></div></div>`;
+}
 async function viewShowings() {
   V().innerHTML = `<h1>Showings</h1>
     <div class="sub">Every tour we have booked, and whether it actually happened.</div>
