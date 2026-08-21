@@ -195,7 +195,6 @@ function renderShell() {
     <div class="nav">${MODULES.filter(m=>m.nav && (!m.admin || ME.role==="admin")).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
     <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
-    <span id="modebadge" class="kind" style="margin-right:10px">…</span>
     <div style="position:relative">
       <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
       <div class="whodd" id="whodd">
@@ -208,18 +207,7 @@ function renderShell() {
   </div><div class="wrap" id="view">Loading…</div>`;
   document.getElementById("whoava").onclick = () => { const d = document.getElementById("whodd"); d.style.display = d.style.display === "block" ? "none" : "block"; };
   document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
-  refreshModeBadge();
   pollBots(); if (!window.__botPoll) window.__botPoll = setInterval(pollBots, 45000);
-}
-async function refreshModeBadge() {
-  try {
-    const d = await api("?section=feed");
-    const el = document.getElementById("modebadge"); if (!el) return;
-    // The badge stays: which mode we are in is worth knowing at a glance even without a button
-    // in the header to change it.
-    if (d.mode === "live") { el.textContent = "● LIVE"; el.style.background = "#e6f5ef"; el.style.color = "#15936a"; }
-    else { el.textContent = "⏸ PAUSED"; el.style.background = "#fdf1dc"; el.style.color = "#b8770a"; }
-  } catch { /* badge is best-effort */ }
 }
 /* ---------- BOT STATUS PILLS + AI (Josh 2026-08-18, the INRE header pattern) ----------
    Twenty agents run this business and the app never said whether any of them were alive.
@@ -232,7 +220,11 @@ async function pollBots() {
   try {
     const d = await api("?fn=bots");
     window.__bots = d;
-    el.innerHTML = (d.pills || []).map(function (p) {
+    // Only the AI spend pill is left in the header: it is the one number that costs money while
+    // nobody is looking, so it earns the space. The other three answered questions nobody was asking
+    // from up here.
+    const SHOW = new Set(["ai"]);
+    el.innerHTML = (d.pills || []).filter(function (p) { return SHOW.has(p.key); }).map(function (p) {
       const c = PILLC[p.state] || "#5f6e8a";
       return '<span class="botpill" data-k="' + p.key + '" title="' + esc(p.tip) + '"'
         + ' style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:' + c
