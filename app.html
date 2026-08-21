@@ -165,8 +165,8 @@ const MODULES = [
   { id:"clients",   nav:"Clients",   match: h => h.startsWith("#/clients"),   render: () => viewClients() },
   { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"assigned",  nav:"Assigned",  match: h => h.startsWith("#/assigned"),  render: () => viewAssigned() },
-  { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
   { id:"nurture",   nav:"Nurture",   match: h => h.startsWith("#/nurture"),   render: () => viewNurture() },
+  { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
   { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
   { id:"contract",  nav:"Under contract", match: h => h.startsWith("#/contract"), render: () => viewContract() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
@@ -1133,75 +1133,20 @@ async function viewBoard() {
 /* Alerts lived on Home and nowhere else, so deleting Home would have deleted the only place they
    could be seen or resolved. They belong next to the pipeline anyway -- an alert is a thing that
    has gone wrong with the work on this page. */
-/* HOW A LEAD MOVES (Josh 2026-08-20: "make sure I know how things are going to flow in here").
-   Live counts, not a diagram -- every number is the real one and every step is a link, so the map
-   doubles as the thing you steer by. A step glows amber when it is holding work that is waiting on
-   a person rather than on a client. */
-/* AGENTS ON THE MAP (Josh 2026-08-20: "toggle and see Agents as a datapoint... Team Agents,
-   Showing Agents, Referral Agents").
+/* HOW A LEAD MOVES — Josh's own description, 2026-08-20, verbatim:
+   "leads come in, they get assigned. once assigned you either put them on nurture or you show them
+   a home. once shown a home you either offer them or send them back to nurture. once in nurture you
+   try to get them into a showing again. then after a showing they make an offer, after an offer
+   they go back to nurture or to under contract, after under contract back to nurture or they fully
+   close. Thats the whole deal all of it right there."
 
-   Two kinds of mark, and the difference is not cosmetic. A PIN is a person at an address we
-   actually hold. A CIRCLE is a town we have recruited agents for, drawn on the town rather than on
-   anyone's house, sized by how many.
+   So this is not a funnel, it is a loop with one exit. Nurture is the hub every failed step falls
+   back to, and the only way out of the whole machine is a close (or a referral, where somebody else
+   owns the client). Drawing it as a straight line -- which every version of this card did until now
+   -- made nurture look like a siding when it is actually the main junction.
 
-   Only the four team agents have addresses. Referral partners have none, our one showing partner
-   has none. Plotting only pins would draw four dots across Michigan and read as "we have no
-   coverage", which is the opposite of true -- there are 31 towns with a bench behind them. So the
-   panel draws both and names the people it could not place, so an empty patch of map reads as
-   missing data rather than as a hole in coverage. */
-window.AMAP = null;
-async function drawAgentMap() {
-  const host = document.getElementById("amap"); if (!host) return;
-  host.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px">
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-team" checked> <b style="color:#1554b0">●</b> Team</label>
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-show" checked> <b style="color:#0fb5a6">●</b> Showing partners</label>
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-ref" checked> <b style="color:#7c3aed">●</b> Referral partners</label>
-      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-bench" checked> <b style="color:#b8770a">○</b> Recruiting bench, by town</label>
-      <span class="meta" id="ly-note" style="margin-left:auto"></span>
-    </div><div id="amapc" style="height:396px"></div>`;
-
-  await loadLeaflet();
-  const d = await lapi("&section=agent_map");
-  if (d.error) { document.getElementById("amapc").innerHTML = `<div class="empty" style="padding:16px">${esc(d.error)}</div>`; return; }
-
-  const map = L.map("amapc", { scrollWheelZoom: false }).setView([44.3, -85.4], 6);
-  window.AMAP = map;
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: "© OpenStreetMap © CARTO", maxZoom: 18 }).addTo(map);
-
-  const layer = (rows, colour, label) => {
-    const g = L.layerGroup();
-    rows.forEach(a => {
-      if (a.lat == null) return;
-      L.circleMarker([a.lat, a.lng], { radius: 7, color: colour, fillColor: colour, fillOpacity: .85, weight: 2 })
-        .bindTooltip(`<b>${esc(a.name)}</b><br>${label}${a.brokerage ? "<br>" + esc(a.brokerage) : ""}${a.address ? "<br>" + esc(a.address) : ""}`)
-        .addTo(g);
-    });
-    return g;
-  };
-  const gTeam = layer(d.team || [], "#1554b0", "team agent");
-  const gShow = layer(d.showing || [], "#0fb5a6", "showing partner");
-  const gRef  = layer(d.referral || [], "#7c3aed", "referral partner");
-
-  const gBench = L.layerGroup();
-  (d.towns || []).forEach(t => {
-    L.circleMarker([t.lat, t.lng], {
-      radius: Math.max(7, Math.min(26, 5 + Math.sqrt(t.agents) * 3.4)),
-      color: "#b8770a", fillColor: "#b8770a", fillOpacity: .18, weight: 1.5,
-    }).bindTooltip(`<b>${esc(t.town)}</b><br>${t.agents} agent${t.agents===1?"":"s"} recruited<br>${t.texted} contacted<br><i>placed on the town, not an address</i>`).addTo(gBench);
-  });
-
-  [gBench, gTeam, gShow, gRef].forEach(g => g.addTo(map));
-  const bind = (id, g) => { const b = document.getElementById(id);
-    b.onchange = () => b.checked ? g.addTo(map) : map.removeLayer(g); };
-  bind("ly-team", gTeam); bind("ly-show", gShow); bind("ly-ref", gRef); bind("ly-bench", gBench);
-
-  const m = d.missing || {};
-  const cant = [...(m.team||[]), ...(m.showing||[]), ...(m.referral||[])];
-  document.getElementById("ly-note").innerHTML = cant.length
-    ? `⚠ no address on file, so not shown: <b>${esc(cant.join(", "))}</b>`
-    : "every agent is on the map";
-  setTimeout(() => map.invalidateSize(), 40);
-}
+   Live counts, every box a link. A box goes amber when it holds work that is waiting on a PERSON
+   rather than on a client. */
 async function drawFlow() {
   const el = document.getElementById("pflow"); if (!el) return;
   const [b, a] = await Promise.all([
@@ -1209,27 +1154,40 @@ async function drawFlow() {
     lapi("&section=assigned").catch(() => ({})),
   ]);
   const c = b.counts || {}, k = a.counts || {};
+  const leadsN = (c.uncovered ?? 0) + (c.also_waiting ?? 0);
+  const showingsN = (k.booked ?? 0) + (k.needs_debrief ?? 0) + (k.decide ?? 0);
   const step = (icon, label, n, href, warn, note) => `
-    <a href="${href}" style="flex:1;min-width:132px;text-decoration:none;background:#fff;border:1px solid ${warn?"#f0dfae":"var(--line)"};
-       ${warn?"background:#fffdf6;":""}border-radius:12px;padding:10px 12px;display:block">
+    <a href="${href}" style="flex:1;min-width:118px;text-decoration:none;background:${warn ? "#fffdf6" : "#fff"};
+       border:1px solid ${warn ? "#f0dfae" : "var(--line)"};border-radius:12px;padding:10px 12px;display:block">
       <div class="meta" style="font-size:11px">${icon} ${label}</div>
-      <div style="font-size:22px;font-weight:800;color:${warn?"var(--amber)":"var(--brand)"};line-height:1.2">${n}</div>
+      <div style="font-size:22px;font-weight:800;color:${warn ? "var(--amber)" : "var(--brand)"};line-height:1.2">${n}</div>
       <div class="meta" style="font-size:10.5px">${note}</div></a>`;
+  const arrow = (t) => `<div style="align-self:center;color:var(--muted,#8a93a2);font-size:13px;padding:0 1px;white-space:nowrap">${t}</div>`;
+
   el.innerHTML = `<div class="card" style="background:#fbfcfe"><div class="body">
     <div class="meta" style="margin-bottom:7px"><b>How a lead moves</b> — every number is live, every box is a link</div>
-    <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:stretch">
-      ${step("📥","Leads", (c.uncovered ?? 0) + (c.also_waiting ?? 0), "#/leads", ((c.uncovered ?? 0) + (c.also_waiting ?? 0)) > 0, "need an agent")}
-      ${step("👤","Assigned", k.needs_showing ?? 0, "#/assigned", (k.needs_showing ?? 0) > 0, "nothing booked yet")}
-      ${step("📅","Showings", k.booked ?? 0, "#/showings", false, "on the calendar")}
-      ${step("🌱","Nurture", k.nurturing ?? 0, "#/nurture", false, "not ready yet")}
-      ${step("💰","Offers", k.offer_out ?? 0, "#/offers", false, "waiting on an answer")}
-      ${step("🏁","Under contract", k.under_contract ?? 0, "#/contract", false, "hand to INRE")}
+    <div style="display:flex;gap:5px;flex-wrap:wrap;align-items:stretch">
+      ${step("📥", "Leads", leadsN, "#/leads", leadsN > 0, "need an agent")}
+      ${arrow("→")}
+      ${step("👤", "Assigned", k.needs_showing ?? 0, "#/assigned", (k.needs_showing ?? 0) > 0, "nothing booked yet")}
+      ${arrow("→")}
+      ${step("🌱", "Nurture", k.nurturing ?? 0, "#/nurture", false, "not ready yet")}
+      ${arrow("⇄")}
+      ${step("📅", "Showings", showingsN, "#/showings", (k.needs_debrief ?? 0) > 0, "touring")}
+      ${arrow("→")}
+      ${step("💰", "Offers", k.offer_out ?? 0, "#/offers", false, "waiting on an answer")}
+      ${arrow("→")}
+      ${step("🏁", "Under contract", c.under_contract_open ?? 0, "#/contract", (c.under_contract_open ?? 0) > 0, "needs the INRE handoff")}
+      ${arrow("→")}
+      ${step("✅", "Closed", c.closed ?? 0, "#/contract", false, "tracked on INRE")}
     </div>
-    <div class="meta" style="margin-top:8px">
-      Nurture is not a dead end — anyone resting can go back to a showing the moment they are ready.
-      ${(k.needs_debrief ?? 0) > 0 ? `<b style="color:var(--amber)">${k.needs_debrief} shown but never debriefed</b> — that is the gap between Showings and what comes next, and it sits on <a href="#/assigned" style="color:var(--blue)">Assigned</a>. ` : ""}
-      ${(k.referred ?? 0) > 0 ? `<b>🤝 ${k.referred} referred out</b> — another agent owns those.` : ""}
-      Amber means somebody here is holding it up.
+    <div class="meta" style="margin-top:9px;line-height:1.7">
+      <b>Nurture is the junction, not a siding.</b> A showing that does not land goes back to nurture;
+      an offer that does not land goes back to nurture; a contract that falls through goes back to nurture.
+      From nurture the job is always the same — get them into another showing.
+      ${(k.needs_debrief ?? 0) > 0 ? `<br><b style="color:var(--amber)">⚠ ${k.needs_debrief} shown but never debriefed</b> — until somebody logs what they thought, they cannot move to an offer or back to nurture. They are stuck. <a href="#/assigned" style="color:var(--blue)">Clear them</a>.` : ""}
+      ${(k.referred ?? 0) > 0 ? `<br>🤝 <b>${k.referred} referred out</b> — the other way a client leaves the loop: another agent owns the relationship.` : ""}
+      <br><span style="font-size:11px">The final close happens on the INRE platform after handoff, so RefNet counts what it has handed over rather than claiming to know the closing date.</span>
     </div>
   </div></div>`;
 }
@@ -1327,44 +1285,86 @@ window.jumpToLead = (id) => {
    between a queue and a filing cabinet. The two screens read the same derivation on the server, so
    a client can never be in both.
 
-   Clicking anybody opens the same lead file you get from Leads: one record, one workspace, whatever
-   door you came in through. */
+   The filter row speaks the SIX stages the whole app now speaks -- leads, assigned, showings,
+   nurture, offers, under contract -- because a second vocabulary on this page was the thing making
+   Pipeline and Clients look like they disagreed. The finer states did not go away, they went BELOW:
+   "needs a debrief" is a real and expensive condition (a tour happened and nobody wrote down what
+   the client thought) and folding it silently into Showings would have hidden it. It is a second
+   row of chips instead, where it is still one click and still counted.
+
+   Everything filters in the browser off one fetch. At this size that is instant, and it means the
+   counts on the chips can never disagree with the rows underneath them. */
 const CSTAGE = {
-  unassigned:     ["🚨 Needs an agent",   "var(--red)"],
-  recruiting:     ["🤝 Recruiting",       "var(--amber)"],
-  needs_showing:  ["📅 Nothing booked",   "var(--red)"],
-  needs_debrief:  ["📝 Needs a debrief",  "var(--amber)"],
-  decide:         ["🔀 Offer or nurture", "var(--blue)"],
-  booked:         ["📅 Booked",           "var(--blue)"],
-  offer_out:      ["💰 Offer out",        "var(--blue)"],
-  under_contract: ["🏁 Under contract",   "var(--green)"],
-  nurturing:      ["🌱 Nurturing",        "var(--purple)"],
-  referred:       ["🤝 Referred out",     "var(--line)"],
+  unassigned:     ["Needs an agent",  "var(--red)"],
+  recruiting:     ["Recruiting",      "var(--amber)"],
+  needs_showing:  ["Nothing booked",  "var(--red)"],
+  needs_debrief:  ["Needs a debrief", "var(--amber)"],
+  decide:         ["Seen it",         "var(--blue)"],
+  booked:         ["Booked",          "var(--blue)"],
+  offer_out:      ["Offer out",       "var(--blue)"],
+  under_contract: ["Under contract",  "var(--green)"],
+  nurturing:      ["Nurturing",       "var(--purple)"],
+  referred:       ["Referred out",    "var(--line)"],
 };
-let CSTAGEF = "", CSEL = null;
+// The six the nav, the pipeline and this page all agree on. A group can hold more than one derived
+// state -- Showings covers booked, shown-not-yet-debriefed, and seen-it-now-decide -- because those
+// are all "the touring stage" from where Josh sits.
+const CGROUP = [
+  ["leads",     "📥 Leads",          ["unassigned", "recruiting"]],
+  ["assigned",  "👤 Assigned",       ["needs_showing"]],
+  ["nurture",   "🌱 Nurture",        ["nurturing"]],
+  ["showings",  "📅 Showings",       ["booked", "needs_debrief", "decide"]],
+  ["offers",    "💰 Offers",         ["offer_out"]],
+  ["contract",  "🏁 Under contract", ["under_contract"]],
+];
+// Below the six: the states worth filtering on their own, either because they are work (a debrief
+// nobody did) or because they are not really ours any more (referred out).
+const CSUB = ["needs_debrief", "recruiting", "decide", "referred"];
+let CSTAGEF = "", CSEL = null, CQ = "";
 async function viewClients() {
   V().innerHTML = `<h1>Clients</h1>
     <div class="sub">Everybody, whatever stage they are at. Leads that still need an agent are also on <a href="#/leads" style="color:var(--blue)">Leads</a>, which is the inbox — this is the book.</div>
     <div class="zchips" id="cchips"></div>
+    <div class="zchips" id="csub" style="margin-top:-4px"></div>
     <div class="msgshell"><div class="convlist" id="clientlist">Loading…</div>
     <div class="thread" id="leaddetail"><div class="empty" style="padding:20px">Pick a client.</div></div></div>`;
-  await refreshClients();
+  await loadClients();
 }
-window.setCStage = (k) => { CSTAGEF = k; refreshClients(); };
-async function refreshClients() {
-  const q = (document.getElementById("cq")?.value || "").trim();
-  const d = await lapi("&section=clients" + (CSTAGEF ? "&stage=" + CSTAGEF : "") + (q ? "&q=" + encodeURIComponent(q) : ""));
-  window.__clients = d.rows || [];
-  const c = d.counts || {};
+window.setCStage = (k) => { CSTAGEF = (CSTAGEF === k ? "" : k); drawClients(); };
+async function loadClients() {
+  const d = await lapi("&section=clients");
+  window.__clientsAll = d.rows || [];
+  window.__ccounts = d.counts || {};
+  drawClients();
+}
+function drawClients() {
+  const all = window.__clientsAll || [], c = window.__ccounts || {};
+  const q = CQ.trim().toLowerCase();
+  const grp = CGROUP.find(g => g[0] === CSTAGEF);
+  const keys = grp ? grp[2] : (CSTAGEF ? [CSTAGEF] : null);
+  let rows = keys ? all.filter(r => keys.includes(r.stage)) : all;
+  if (q) rows = rows.filter(r => [r.client, r.city, r.address, r.zip, r.agent, r.phone, r.email]
+    .some(v => String(v ?? "").toLowerCase().includes(q)));
+  window.__clients = rows;
+  const n = (ks) => ks.reduce((a, k) => a + (c[k] || 0), 0);
+
   document.getElementById("cchips").innerHTML =
-    `<button class="${CSTAGEF === "" ? "on" : ""}" onclick="setCStage('')">All <b>${d.total || 0}</b></button>`
-    + (d.order || []).filter(k => c[k]).map(k =>
-        `<button class="${CSTAGEF === k ? "on" : ""}" onclick="setCStage('${k}')">${(CSTAGE[k] || [k])[0]} <b>${c[k]}</b></button>`).join("")
-    + `<input id="cq" placeholder="Search name, city, address, agent, phone…" style="width:280px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
-        value="${esc(q)}" onkeydown="if(event.key==='Enter')refreshClients()">`;
+    `<button class="${CSTAGEF === "" ? "on" : ""}" onclick="setCStage('')">All <b>${all.length}</b></button>`
+    + CGROUP.map(([k, label, ks]) =>
+        `<button class="${CSTAGEF === k ? "on" : ""}" onclick="setCStage('${k}')">${label} <b>${n(ks)}</b></button>`).join("")
+    + `<input id="cq" placeholder="Search name, city, address, agent, phone…" style="width:270px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
+        value="${esc(CQ)}" oninput="CQ=this.value" onkeydown="if(event.key==='Enter')drawClients()">`;
+
+  document.getElementById("csub").innerHTML =
+    `<span class="meta" style="padding:7px 4px 7px 0;font-size:11.5px">within those:</span>`
+    + CSUB.filter(k => c[k]).map(k => {
+        const [label, colour] = CSTAGE[k];
+        return `<button class="${CSTAGEF === k ? "on" : ""}" onclick="setCStage('${k}')"
+          style="font-size:11.5px;padding:5px 11px;border-color:${colour}">${label} <b>${c[k]}</b></button>`;
+      }).join("");
 
   const el = document.getElementById("clientlist"); if (!el) return;
-  el.innerHTML = window.__clients.map((r, i) => {
+  el.innerHTML = rows.map((r, i) => {
     const [label, colour] = CSTAGE[r.stage] || [r.stage, "var(--line)"];
     return `<div class="convrow ${CSEL === r.lead_id ? "sel" : ""}" onclick="openClientIdx(${i})" style="border-left:3px solid ${colour}">
       <span class="whoName">${esc(r.client)}</span>
@@ -1378,10 +1378,13 @@ async function refreshClients() {
     </div>`;
   }).join("") || `<div class="empty" style="padding:14px">Nobody matches.</div>`;
 }
+window.drawClients = drawClients;
+async function refreshClients() { await loadClients(); }
 window.openClientIdx = (i) => {
   const r = (window.__clients || [])[i]; if (!r) return;
-  CSEL = r.lead_id; refreshClients(); loadLead(r.lead_id);
+  CSEL = r.lead_id; drawClients(); loadLead(r.lead_id);
 };
+
 /* ---------- LEADS (Josh 2026-08-17) ----------
    The lead file: who they are, every text/call/email in one stream, the call summaries the
    transcriber wrote, and WHY the machine called them a tour request vs a question vs nurture.
@@ -2193,15 +2196,20 @@ function showSecret(title, pw, email) {
    showings and offers it describes. Nothing here is a dead end except under contract and referred
    out -- a passed showing goes back to nurture or straight to another booking, which is the loop
    Josh described. */
+// The headings say the SAME six words as the nav, the pipeline and the Clients chips -- Josh has
+// asked for one vocabulary three times now, and three screens each inventing their own phrasing for
+// the same derived state is how you end up unsure whether they are describing the same clients.
+// The qualifier that used to be IN the heading ("nothing booked", "needs a debrief") moved down to
+// the blurb, where it still tells you exactly what is wrong without pretending to be a new stage.
 const ASTAGE = {
-  needs_showing:  ["🚨 Assigned — nothing booked", "var(--red)",   "They have an agent and an empty calendar."],
-  needs_debrief:  ["📝 Shown — needs a debrief",   "var(--amber)", "The tour has been and gone. What did they think?"],
-  decide:         ["🔀 Seen it — offer or nurture","var(--blue)",  "They have viewed something. Next move is yours."],
-  booked:         ["📅 Showing booked",            "var(--line)",  "On the calendar, nothing to do."],
-  offer_out:      ["💰 Offer out",                 "var(--blue)",  "Waiting on an answer."],
-  under_contract: ["🏁 Under contract",            "var(--green)", "Hand it to the INRE platform."],
-  nurturing:      ["🌱 Nurturing",                 "var(--purple)","Not ready; will resurface."],
-  referred:       ["🤝 Referred out",              "var(--line)",  "Another agent owns the relationship."],
+  needs_showing:  ["👤 Assigned",       "var(--red)",   "They have an agent and an empty calendar. Book something."],
+  nurturing:      ["🌱 Nurture",        "var(--purple)","Not ready yet; they will resurface."],
+  needs_debrief:  ["📅 Showings",       "var(--amber)", "The tour has been and gone and nobody logged it. What did they think?"],
+  decide:         ["📅 Showings",       "var(--blue)",  "They have seen something. Next move is yours: offer, or nurture."],
+  booked:         ["📅 Showings",       "var(--line)",  "On the calendar. Nothing to do until it happens."],
+  offer_out:      ["💰 Offers",         "var(--blue)",  "Waiting on an answer."],
+  under_contract: ["🏁 Under contract", "var(--green)", "Hand it to the INRE platform."],
+  referred:       ["🤝 Referred out",   "var(--line)",  "Another agent owns the relationship."],
 };
 async function viewAssigned() {
   V().innerHTML = `<h1>Assigned</h1>
