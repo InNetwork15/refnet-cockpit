@@ -176,7 +176,9 @@ const MODULES = [
   // where they are, so #/email still opens it and turning the tab back on is one word.
   { id:"email",     nav:null,        match: h => h.startsWith("#/email"),     render: () => viewEmail() },
   { id:"agents",    nav:"Agents",    match: h => h.startsWith("#/agents"),    render: () => viewAgents() },
-  { id:"recruiting",nav:"Recruiting",match: h => h.startsWith("#/recruiting"),render: () => viewRecruiting() },
+  // Josh 2026-08-20: "move the whole recruiting page into the agents page and use some accordion."
+  // nav:null keeps the URL alive and sends it to Agents, so old links and bookmarks still land.
+  { id:"recruiting",nav:null,       match: h => h.startsWith("#/recruiting"),render: () => { location.hash = "#/agents"; } },
   { id:"agent",     nav:null,        match: h => h.startsWith("#/agent/"),    render: () => viewAgentProfile() },
   // Josh 2026-08-20: "leads by zip and coverage map should be combined into one page." They were
   // two answers to the same question -- where is this business happening -- split across two tabs,
@@ -193,7 +195,6 @@ function renderShell() {
     <div class="nav">${MODULES.filter(m=>m.nav && (!m.admin || ME.role==="admin")).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
     <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
-    ${ME.role==="admin" ? `<button id="bigpause" style="margin-right:12px;border-radius:999px;font-weight:800;background:#d23b34;box-shadow:0 1px 2px rgba(210,59,52,.35)">⏸ PAUSE ALL</button>` : ""}
     <span id="modebadge" class="kind" style="margin-right:10px">…</span>
     <div style="position:relative">
       <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
@@ -209,26 +210,15 @@ function renderShell() {
   document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
   refreshModeBadge();
   pollBots(); if (!window.__botPoll) window.__botPoll = setInterval(pollBots, 45000);
-  const bp = document.getElementById("bigpause");
-  if (bp) bp.onclick = async () => {
-    const badge = document.getElementById("modebadge").textContent;
-    const goingLive = badge.includes("PAUSED");
-    const msg = goingLive
-      ? "Resume LIVE mode? Automated texts start flowing again immediately."
-      : "PAUSE ALL AUTOMATIONS? Every automated text stops instantly (calls & inbound still get logged). You can resume any time.";
-    if (!confirm(msg)) return;
-    const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_mode", value: goingLive ? "live" : "test" }) });
-    if (!r.ok) alert("Not changed: " + (r.error||"unknown"));
-    refreshModeBadge();
-  };
 }
 async function refreshModeBadge() {
   try {
     const d = await api("?section=feed");
     const el = document.getElementById("modebadge"); if (!el) return;
-    const bp = document.getElementById("bigpause");
-    if (d.mode === "live") { el.textContent = "● LIVE"; el.style.background = "#e6f5ef"; el.style.color = "#15936a"; if (bp) bp.textContent = "⏸ PAUSE ALL"; }
-    else { el.textContent = "⏸ PAUSED"; el.style.background = "#fdf1dc"; el.style.color = "#b8770a"; if (bp) bp.textContent = "▶ RESUME LIVE"; }
+    // The badge stays: which mode we are in is worth knowing at a glance even without a button
+    // in the header to change it.
+    if (d.mode === "live") { el.textContent = "● LIVE"; el.style.background = "#e6f5ef"; el.style.color = "#15936a"; }
+    else { el.textContent = "⏸ PAUSED"; el.style.background = "#fdf1dc"; el.style.color = "#b8770a"; }
   } catch { /* badge is best-effort */ }
 }
 /* ---------- BOT STATUS PILLS + AI (Josh 2026-08-18, the INRE header pattern) ----------
@@ -785,94 +775,54 @@ const FEEDLABEL = {
   optout_confirm:"🛑 Opt-out confirmed", task_reminder:"📋 Task reminder", call:"📞 Call", inbound:"⬅ They texted", outbound:"➡ Text",
 };
 
-/* ---------- AGENTS (partners + recruiting bench) ---------- */
-const PSTATUS = { candidate:"", outreach:"lane-agent", negotiating:"lane-agent", active:"lane-client", inactive:"hot" };
-/* ---------- AGENTS (Josh 2026-08-20) ----------
-   "Agents Page Should just be the list of Agents That have showed homes for us as a showing
-   partner and agents that we've referred clients to. So two separate lists."
+/* ---------- AGENTS — everyone, in four drawers (Josh 2026-08-20) ----------
+   "move the whole recruiting page into the agents page and use some accordion."
 
-   Two different relationships, and the page used to blur them into one table that also included
-   every candidate the recruiter had ever texted. A SHOWING partner opens a door for a fee and
-   hands the client back. A REFERRAL partner is given the client outright and we take a fee on
-   their side. Opposite directions of travel; they do not belong in one list.
+   Recruiting was split out on 2026-08-19 because it was a card at the bottom of Agents rendering
+   ~490 people at once, and the one town that needed you looked exactly like the fifty that did not.
+   The problem was never that it shared a page -- it was that everything was expanded. Accordions
+   fix that properly: four drawers, each showing its headline count closed, so the whole agent world
+   is one screen you can scan and one click to open the part you want.
 
-   Anyone merely contacted lives on Recruiting now. This page is people we have actually done
-   business with, so a name here means something. */
+   The four are genuinely different relationships and the page keeps them apart:
+     TEAM      -- our own. No agreement, no fee.
+     SHOWING   -- opens a door for a fee and hands the client back.
+     REFERRAL  -- given the client outright; we take a fee on their side.
+     BENCH     -- researched, signed nothing. Cannot be handed a client until they agree.
+   Both pages were already calling the same endpoint, so merging them also removes a duplicate
+   round trip rather than adding one. */
+function acc(id, icon, title, badges, body, open) {
+  return `<details ${open ? "open" : ""} class="card" style="padding:0;margin-bottom:10px">
+    <summary style="cursor:pointer;list-style:none;padding:13px 16px;display:flex;align-items:center;gap:9px;flex-wrap:wrap">
+      <span style="font-size:15px;font-weight:700">${icon} ${title}</span>
+      ${badges}
+      <span style="flex:1"></span>
+      <span class="meta" style="font-size:11px">click to open</span>
+    </summary>
+    <div class="body" style="border-top:1px solid var(--line)" id="${id}">${body}</div>
+  </details>`;
+}
 async function viewAgents() {
   V().innerHTML = `<h1>Agents</h1>
-    <div class="sub">The agents we have actually done business with. Everyone still being courted is on Recruiting.</div>
-    <div class="card"><h2>👥 Our team</h2><div class="body" id="team">Loading…</div></div>
-    <div class="card"><h2>🏠 Showing partners</h2><div class="body" id="partners">Loading…</div></div>
-    <div class="card"><h2>🤝 Agents we have referred clients to</h2><div class="body" id="referrals">Loading…</div></div>`;
+    <div class="sub">Everyone we work with or are trying to. Only the first three drawers can be handed a client — the bench has signed nothing yet.</div>
+    <div id="agentacc">Loading…</div>`;
   const d = await api("?section=agents");
   const $ = (n) => n == null ? "—" : "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 });
   const all = d.partners || [];
 
-  // Our own agents. They were on NEITHER list -- filtered out of showing partners by !is_team and
-  // not referral partners either -- so Anthony, Tony, TJ and Brody were unreachable from this page
-  // and their profiles could not be opened at all. The people we schedule most were the only ones
-  // with no way in.
+  // Our own agents. They were once on NEITHER list -- filtered out of showing partners by !is_team
+  // and not referral partners either -- so the people we schedule most had no way in at all.
   const team = all.filter(p => p.is_team);
-  // Earned a place on this page: they showed a house, or they signed terms with us.
+  // Earned a place: they showed a house, or they signed terms with us.
   const showing = all.filter(p => !p.is_team && (p.showings_total > 0 || p.terms_agreed_at));
   const referral = all.filter(p => p.is_referral_partner);
 
-  // What is MISSING is the useful column here, because a blank is what stops scheduling working:
-  // no number means we cannot tell them about a booking, no home means we cannot rank them by
-  // distance to a property.
-  document.getElementById("team").innerHTML = team.length
-    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Mobile</th><th>Home (for scheduling)</th><th>Showings</th><th></th></tr>`
-      + team.map(p => `<tr>
-        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>
-          <div class="meta">${esc(p.email||"")}</div></td>
-        <td class="meta">${p.cell_phone ? esc(fmtPh(p.cell_phone)) : '<span class="kind hot">no number — cannot be notified</span>'}</td>
-        <td class="meta">${p.home_address ? esc(p.home_address) : '<span class="kind hot">not set — cannot be ranked by distance</span>'}</td>
-        <td>${p.showings_verified}/${p.showings_total}</td>
-        <td style="white-space:nowrap"><a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/agent/${p.id}">Edit</a>
-          <button class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:4px" onclick="showAgentDay('${p.id}')">📅 Day</button></td></tr>`).join("")
-      + `</table></div>`
-    : `<div class="empty">Nobody is marked as in-house yet.</div>`;
-
-  document.getElementById("partners").innerHTML = showing.length
-    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>`
-      + showing.map(p => `<tr>
-        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
-        <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
-        <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
-        <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
-        <td>${p.showings_verified}/${p.showings_total}</td>
-        <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
-        <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
-    : `<div class="empty">Nobody has shown a house for us yet.</div>`;
-
-  document.getElementById("referrals").innerHTML = referral.length
-    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Brokerage</th><th>Contact</th><th>Referral fee</th><th>Notes</th></tr>`
-      + referral.map(p => `<tr>
-        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a></td>
-        <td class="meta">${esc(p.brokerage_name||"—")}</td>
-        <td class="meta">${p.cell_phone?esc(fmtPh(p.cell_phone)):""}${p.email?(p.cell_phone?" · ":"")+esc(p.email):""}${(!p.cell_phone&&!p.email)?'<span class="kind hot">no contact details</span>':""}</td>
-        <td class="meta">${p.referral_fee_pct!=null?esc(p.referral_fee_pct)+"%":'<span class="kind hot">not set</span>'}</td>
-        <td class="meta">${esc(p.referral_notes||"")}</td></tr>`).join("") + `</table></div>`
-    : `<div class="empty">Nobody yet — these are agents we hand a whole client to, not a single showing.</div>`;
-}
-/* ---------- RECRUITING (Josh 2026-08-19: "i want recruiting to be its own page") ----------
-   It was a card under Agents. Fine at four candidates, useless at ~490 across 55 towns: every
-   agent in every city rendered at once, so the one town that needed you looked exactly like the
-   fifty that did not.
-   A town is a row now. The counts are the point -- how many found, how many never texted, how
-   many said no -- and the list only opens when you ask. Towns with people left to text sort to
-   the top, because that is the only part of this page that is work. */
-async function viewRecruiting() {
-  V().innerHTML = `<h1>Recruiting</h1>
-    <div class="sub">Showing agents we have found, town by town. Anyone who declined is never offered again.</div>
-    <div id="rtiles" class="ztiles"></div>
-    <div class="card"><h2>🎯 The bench</h2><div class="body" id="bench">Loading…</div></div>`;
-  const d = await api("?section=agents");
-  // GROUP BY TOWN, not by job. A town can carry a standing bench AND jobs opened for individual
-  // leads, holding overlapping people; listing jobs meant Kalkaska could appear three times with
-  // the same agents under each. The town is the unit that matters -- "who can show a house here"
-  // -- so the rows are towns and the candidates are merged, deduped on the last ten digits of the
-  // phone. Text-all still targets a real job id: the one with the most people left to contact.
+  // ---- the bench, grouped BY TOWN, not by job ----
+  // A town can carry a standing bench AND jobs opened for individual leads, holding overlapping
+  // people; listing jobs meant Kalkaska could appear three times with the same agents under each.
+  // The town is the unit that matters -- "who can show a house here" -- so rows are towns and the
+  // candidates are merged, deduped on the last ten digits of the phone. Text-all still targets a
+  // real job id: the one with the most people left to contact.
   const byTown = new Map();
   for (const j of (d.recruiting || [])) {
     const key = String(j.gap_city || "(no town)").trim().toLowerCase();
@@ -891,7 +841,6 @@ async function viewRecruiting() {
   const jobs = [...byTown.values()].map(t => {
     const cands = [...t.seen.values()];
     const left = cands.filter(c => !c.contacted && !c.declined && c.phone).length;
-    // whichever underlying job has the most uncontacted people is the one Text-all should drive
     const best = t.ids.slice().sort((a, b) =>
       (b.candidates || []).filter(c => !c.contacted && !c.declined && c.phone).length -
       (a.candidates || []).filter(c => !c.contacted && !c.declined && c.phone).length)[0];
@@ -899,17 +848,55 @@ async function viewRecruiting() {
       texted: cands.filter(c => c.contacted).length,
       declined: cands.filter(c => c.declined).length };
   }).sort((a, b) => (b.left - a.left) || String(a.gap_city).localeCompare(String(b.gap_city)));
-
-  const t = jobs.reduce((a, j) => ({ cities: a.cities + 1, agents: a.agents + j.cands.length,
+  const bt = jobs.reduce((a, j) => ({ cities: a.cities + 1, agents: a.agents + j.cands.length,
       left: a.left + j.left, texted: a.texted + j.texted, declined: a.declined + j.declined }),
     { cities: 0, agents: 0, left: 0, texted: 0, declined: 0 });
-  document.getElementById("rtiles").innerHTML =
-      `<div class="ztile"><span>Towns</span><b>${t.cities}</b><em>${jobs.filter(j => !j.cands.length).length} with nobody yet</em></div>`
-    + `<div class="ztile"><span>Agents found</span><b>${t.agents}</b><em>across every town</em></div>`
-    + `<div class="ztile"><span>Never texted</span><b style="color:${t.left ? "var(--amber)" : "var(--green)"}">${t.left}</b><em>ready to contact</em></div>`
-    + `<div class="ztile"><span>Contacted</span><b>${t.texted}</b><em>${t.declined} said no</em></div>`;
 
-  document.getElementById("bench").innerHTML = jobs.length ? jobs.map(j => `
+  const teamBody = team.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Mobile</th><th>Home (for scheduling)</th><th>Showings</th><th></th></tr>`
+      + team.map(p => `<tr>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>
+          <div class="meta">${esc(p.email||"")}</div></td>
+        <td class="meta">${p.cell_phone ? esc(fmtPh(p.cell_phone)) : '<span class="kind hot">no number — cannot be notified</span>'}</td>
+        <td class="meta">${p.home_address ? esc(p.home_address) : '<span class="kind hot">not set — cannot be ranked by distance</span>'}</td>
+        <td>${p.showings_verified}/${p.showings_total}</td>
+        <td style="white-space:nowrap"><a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/agent/${p.id}">Edit</a>
+          <button class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:4px" onclick="showAgentDay('${p.id}')">📅 Day</button></td></tr>`).join("")
+      + `</table></div>`
+    : `<div class="empty">Nobody is marked as in-house yet.</div>`;
+
+  const showBody = showing.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Deal</th><th>Agreement</th><th>Payout</th><th>Showings</th><th class="money">Owed</th><th class="money">Paid</th><th>Last activity</th></tr>`
+      + showing.map(p => `<tr>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}<div class="meta">${esc(p.brokerage_name||"")}${p.cell_phone?" · "+esc(fmtPh(p.cell_phone)):""}</div></td>
+        <td class="meta">${p.showing_fee_usd?`$${p.showing_fee_usd}/showing`+(p.our_split_pct?` + ${p.our_split_pct}%`:""):"—"}</td>
+        <td>${p.agreement ? (p.agreement.signed ? `<span class="ok">✍️ signed</span>${p.agreement.url?` · <a href="${p.agreement.url}" target="_blank" style="color:var(--blue)">view</a>`:""}` : `<span class="meta">sent, unsigned</span>`) : "—"}</td>
+        <td class="meta">${p.payout_method ? esc(p.payout_method.replace("_"," ")) : '<span class="kind hot">not on file</span>'}</td>
+        <td>${p.showings_verified}/${p.showings_total}</td>
+        <td class="money">${$(p.owed_pending)}</td><td class="money net">${$(p.paid_total)}</td>
+        <td class="meta">${p.last_activity?et(p.last_activity):"—"}</td></tr>`).join("") + `</table></div>`
+    : `<div class="empty">Nobody has shown a house for us yet.</div>`;
+
+  const refBody = referral.length
+    ? `<div style="overflow-x:auto"><table><tr><th>Agent</th><th>Brokerage</th><th>Contact</th><th>Referral fee</th><th>Notes</th></tr>`
+      + referral.map(p => `<tr>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a></td>
+        <td class="meta">${esc(p.brokerage_name||"—")}</td>
+        <td class="meta">${p.cell_phone?esc(fmtPh(p.cell_phone)):""}${p.email?(p.cell_phone?" · ":"")+esc(p.email):""}${(!p.cell_phone&&!p.email)?'<span class="kind hot">no contact details</span>':""}</td>
+        <td class="meta">${p.referral_fee_pct!=null?esc(p.referral_fee_pct)+"%":'<span class="kind hot">not set</span>'}</td>
+        <td class="meta">${esc(p.referral_notes||"")}</td></tr>`).join("") + `</table></div>`
+    : `<div class="empty">Nobody yet — these are agents we hand a whole client to, not a single showing.</div>`;
+
+  // Towns with people left to text sort to the top, because that is the only part of the bench
+  // that is actually work. Each town is its own drawer inside this one.
+  const benchBody = `
+    <div class="ztiles" style="margin-bottom:10px">
+      <div class="ztile"><span>Towns</span><b>${bt.cities}</b><em>${jobs.filter(j => !j.cands.length).length} with nobody yet</em></div>
+      <div class="ztile"><span>Agents found</span><b>${bt.agents}</b><em>across every town</em></div>
+      <div class="ztile"><span>Never texted</span><b style="color:${bt.left ? "var(--amber)" : "var(--green)"}">${bt.left}</b><em>ready to contact</em></div>
+      <div class="ztile"><span>Contacted</span><b>${bt.texted}</b><em>${bt.declined} said no</em></div>
+    </div>
+    ${jobs.length ? jobs.map(j => `
     <details style="border-top:1px solid #f0f2f6;padding:8px 0">
       <summary style="cursor:pointer;display:flex;align-items:center;gap:9px;flex-wrap:wrap">
         <span class="whoName" style="font-size:15px">${esc(j.gap_city)}</span>
@@ -927,8 +914,20 @@ async function viewRecruiting() {
           ${c.declined ? '<span class="kind hot">declined</span>' : c.contacted ? '<span class="kind lane-agent">contacted</span>'
             : (ME.role === "admin" && c.phone ? `<button class="btn ghost" style="padding:4px 12px;font-size:12px" onclick='startOutreach(${JSON.stringify(JSON.stringify({ job_id: j.id, city: j.gap_city, name: c.name, phone: c.phone, brokerage: c.brokerage }))})'>💬 Text them</button>` : '<span class="meta">no phone</span>')}
         </div>`).join("") || '<div class="meta" style="padding-left:12px">Nobody found yet — the recruiter checks this town every 15 minutes.</div>'}</div>
-    </details>`).join("")
-    : `<div class="empty">No recruiting under way.</div>`;
+    </details>`).join("") : `<div class="empty">No recruiting under way.</div>`}`;
+
+  const miss = (n, why) => n ? `<span class="st st-needs">${n} ${why}</span>` : "";
+  document.getElementById("agentacc").innerHTML =
+      acc("team", "👥", "Our team", `<span class="kind">${team.length}</span>`
+        + miss(team.filter(p => !p.cell_phone).length, "no number")
+        + miss(team.filter(p => !p.home_address).length, "no home address"), teamBody, true)
+    + acc("partners", "🏠", "Showing partners", `<span class="kind">${showing.length}</span>`
+        + miss(showing.filter(p => !p.payout_method).length, "no payout method"), showBody, false)
+    + acc("referrals", "🤝", "Referral partners", `<span class="kind">${referral.length}</span>`
+        + miss(referral.filter(p => p.referral_fee_pct == null).length, "no fee set"), refBody, false)
+    + acc("bench", "🎯", "Recruiting bench",
+        `<span class="kind">${bt.agents} across ${bt.cities} towns</span>`
+        + (bt.left ? `<span class="st st-needs">${bt.left} never texted</span>` : ""), benchBody, false);
 }
 /* Text everyone left on a job. The send path is still one message per call underneath -- this
    loops it -- so every gate (mode, allowlist, opted out, already declined) runs per person and
