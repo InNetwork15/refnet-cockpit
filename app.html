@@ -202,6 +202,7 @@ function renderShell() {
   A().innerHTML = `<div class="top">
     <div class="nav">${MODULES.filter(m=>m.nav && (!m.admin || ME.role==="admin")).map(m=>`<a href="#/${m.id}" class="${m.match(h)?"on":""}">${m.nav}</a>`).join("")}</div>
     <div class="spacer"></div>
+    <button class="btn ghost" id="suggbtn" title="Suggest an improvement" style="padding:6px 11px;border-radius:999px;margin-right:8px;font-size:14px;line-height:1">💡</button>
     <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
     <div style="position:relative">
       <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
@@ -214,6 +215,7 @@ function renderShell() {
     </div>
   </div><div class="wrap" id="view">Loading…</div>`;
   document.getElementById("whoava").onclick = () => { const d = document.getElementById("whodd"); d.style.display = d.style.display === "block" ? "none" : "block"; };
+  document.getElementById("suggbtn").onclick = openSuggest;
   document.getElementById("signout").onclick = async () => { await sb.auth.signOut(); SESSION=null; ME=null; renderLogin(null, "Signed out."); };
   pollBots(); if (!window.__botPoll) window.__botPoll = setInterval(pollBots, 45000);
 }
@@ -2802,6 +2804,118 @@ window.changePw = async () => {
   const { error } = await sb.auth.updateUser({ password: p });
   alert(error ? error.message : "Password changed.");
 };
+
+/* ---------- SUGGESTIONS (Josh 2026-08-21: "a suggestions button at the top like we have for
+   INRE Platform") ----------
+   Ported from INRE deliberately rather than reinvented: same 💡 in the same corner, same modal,
+   same submit_suggestion RPC shape, same 10-an-hour limit. Two apps that ask for feedback in two
+   different ways teach the same person two habits for no reason.
+   Screenshot paste is the part that earns its keep -- "this looks terrible" plus a picture is a
+   bug report, the same words without one is a guessing game. */
+function toast(msg) {
+  let t = document.getElementById("toast");
+  if (!t) {
+    t = document.createElement("div"); t.id = "toast";
+    t.style.cssText = "position:fixed;left:50%;bottom:26px;transform:translateX(-50%);z-index:2000;"
+      + "background:var(--brand);color:#fff;font-size:13px;font-weight:600;padding:10px 18px;"
+      + "border-radius:999px;box-shadow:var(--shadow-lg);max-width:90vw;text-align:center";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg; t.style.opacity = "1";
+  clearTimeout(window.__toastT);
+  window.__toastT = setTimeout(() => { t.style.transition = "opacity .4s"; t.style.opacity = "0"; }, 3200);
+}
+function openSuggest() {
+  const old = document.getElementById("suggmodal"); if (old) { old.remove(); return; }
+  const ov = document.createElement("div"); ov.id = "suggmodal";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(21,41,74,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px";
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;box-shadow:0 18px 60px rgba(0,0,0,.3);padding:20px 22px">'
+    + '<div style="font-weight:700;font-size:15px;margin-bottom:4px">💡 Suggest an improvement</div>'
+    + '<div class="sub" style="font-size:12px;margin-bottom:10px">What would make RefNet work better for you? Every suggestion is logged and reviewed — you&#39;ll hear back once it&#39;s acted on.</div>'
+    + '<textarea id="suggtext" style="width:100%;min-height:110px;padding:10px;border:1px solid #d7e0f5;border-radius:8px;font:inherit;font-size:13px;box-sizing:border-box" placeholder="Describe the change or idea…"></textarea>'
+    + '<div style="display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap"><button class="btn ghost" id="suggattach" style="padding:5px 12px;font-size:12px">📎 Attach files</button>'
+    + '<span class="sub" style="font-size:11px;margin:0">or paste a screenshot (Ctrl+V) · up to 5 files, 8MB each</span>'
+    + '<input type="file" id="suggfiles" multiple accept="image/*,application/pdf" style="display:none"></div>'
+    + '<div id="suggatts" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn ghost" id="suggcancel">Cancel</button><button class="btn" id="suggsend">Submit suggestion</button></div>'
+    + '<div id="suggrecent"></div></div>';
+  document.body.appendChild(ov);
+  // A suggestion box nobody can open is just a delete key with extra steps. INRE has a whole AI
+  // reviewer and a digest email behind its box; this is the cheap half of that -- an admin opening
+  // the modal sees what has actually come in, so the loop closes without an API bill.
+  if (ME && ME.role === "admin") {
+    sb.from("refnet_suggestions").select("name,page,body,status,created_at,attachments")
+      .order("created_at", { ascending: false }).limit(8).then(({ data }) => {
+        const box = ov.querySelector("#suggrecent"); if (!box) return;
+        if (!data || !data.length) {
+          box.innerHTML = '<div class="sub" style="font-size:11.5px;margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line)">Nothing submitted yet.</div>';
+          return;
+        }
+        box.innerHTML = '<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">'
+          + '<div style="font-size:11.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:7px">Latest suggestions</div>'
+          + '<div style="max-height:190px;overflow:auto;display:flex;flex-direction:column;gap:7px">'
+          + data.map(r =>
+              '<div style="font-size:12px;line-height:1.45">'
+              + '<b>' + esc(r.name || "someone") + '</b> '
+              + '<span class="sub" style="font-size:11px;margin:0">' + esc(et(r.created_at))
+              + (r.page ? " · " + esc(r.page) : "")
+              + (r.attachments && r.attachments.length ? " · 📎" + r.attachments.length : "") + '</span><br>'
+              + esc(r.body.length > 150 ? r.body.slice(0,150) + "…" : r.body) + '</div>').join("")
+          + '</div></div>';
+      });
+  }
+  // Clicking the backdrop discards -- but never once there are words in the box, because losing a
+  // typed-out suggestion to a stray click is how people stop bothering to send them.
+  ov.onclick = (e) => { if (e.target === ov && !(ov.querySelector("#suggtext")||{}).value) ov.remove(); };
+  ov.querySelector("#suggcancel").onclick = () => ov.remove();
+  ov.querySelector("#suggtext").focus();
+
+  const files = [];
+  function chips() {
+    ov.querySelector("#suggatts").innerHTML = files.map((f,i) =>
+      '<span style="font-size:11.5px;background:#eef4ff;color:#1d4f9e;border:1px solid #cfe0fb;border-radius:999px;padding:3px 10px;display:inline-flex;align-items:center;gap:6px">'
+      + esc(f.name.length > 28 ? f.name.slice(0,28) + "…" : f.name)
+      + '<span data-i="' + i + '" class="sugg-rm" style="cursor:pointer;font-weight:700">✕</span></span>').join("");
+    ov.querySelectorAll(".sugg-rm").forEach(x => x.onclick = () => { files.splice(Number(x.dataset.i),1); chips(); });
+  }
+  function add(f) {
+    if (!f) return;
+    if (files.length >= 5) { toast("Max 5 attachments"); return; }
+    if (f.size > 8*1024*1024) { toast(f.name + " is over 8MB"); return; }
+    files.push(f); chips();
+  }
+  ov.querySelector("#suggattach").onclick = () => ov.querySelector("#suggfiles").click();
+  ov.querySelector("#suggfiles").onchange = function () { Array.from(this.files||[]).forEach(add); this.value = ""; };
+  ov.addEventListener("paste", (e) => {
+    let got = false;
+    Array.from((e.clipboardData && e.clipboardData.files) || []).forEach(f => {
+      if (f.type.indexOf("image/") === 0) {
+        add(new File([f], "screenshot-" + new Date().toISOString().replace(/[:.]/g,"-") + ".png", { type:f.type }));
+        got = true;
+      }
+    });
+    if (got) e.preventDefault();
+  });
+
+  ov.querySelector("#suggsend").onclick = async function () {
+    const body = (ov.querySelector("#suggtext").value || "").trim();
+    if (!body) { toast("Write the suggestion first"); return; }
+    const btn = this; btn.textContent = "Submitting…"; btn.disabled = true;
+    const reset = (m) => { toast(m); btn.textContent = "Submit suggestion"; btn.disabled = false; };
+    const atts = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const path = ((ME && ME.id) || "anon") + "/" + Date.now() + "-" + i + "-" + f.name.replace(/[^A-Za-z0-9._-]/g,"_");
+      const up = await sb.storage.from("suggestions").upload(path, f, { contentType: f.type || "application/octet-stream" });
+      if (up && up.error) { reset("Attachment upload failed: " + up.error.message); return; }
+      atts.push({ path, name: f.name, type: f.type || "", size: f.size });
+    }
+    const r = await sb.rpc("submit_suggestion", { p_body: body, p_page: location.hash || "", p_attachments: atts });
+    if (r && r.error) { reset("Failed: " + r.error.message); return; }
+    if (r && r.data && r.data.error === "rate_limited") { reset("Too many suggestions in the last hour — try again later"); return; }
+    ov.remove(); toast("Thank you — your suggestion was logged for review 💡");
+  };
+}
 
 /* ---------- BOOT ---------- */
 async function boot() {
