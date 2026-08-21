@@ -2263,7 +2263,7 @@ const ASTAGE = {
 };
 async function viewAssigned() {
   V().innerHTML = `<h1>Assigned</h1>
-    <div class="sub">Every lead somebody owns, and what it is waiting on. Leads that still need an agent are on the Leads page.</div>
+    <div class="sub">Somebody owns these and nothing is on the calendar yet. Once a tour is booked they move to <a href="#/showings" style="color:var(--blue)">Showings</a>.</div>
     <div id="atiles" class="ztiles"></div><div id="alist">Loading…</div>`;
   const d = await lapi("&section=assigned");
   const rows = d.rows || [], c = d.counts || {};
@@ -2271,8 +2271,8 @@ async function viewAssigned() {
 
   document.getElementById("atiles").innerHTML =
       `<div class="ztile"><span>Nothing booked</span><b style="color:${c.needs_showing?"var(--red)":"var(--green)"}">${c.needs_showing||0}</b><em>has an agent, empty calendar</em></div>`
-    + `<div class="ztile"><span>Needs a debrief</span><b style="color:${c.needs_debrief?"var(--amber)":"var(--green)"}">${c.needs_debrief||0}</b><em>shown, never logged</em></div>`
-    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on the calendar</em></div>`
+    + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on <a href="#/showings" style="color:var(--blue)">Showings</a></em></div>`
+    + `<div class="ztile"><span>Resting</span><b>${c.nurturing||0}</b><em>on <a href="#/nurture" style="color:var(--blue)">Nurture</a></em></div>`
     + `<div class="ztile"><span>Offers / contract</span><b>${(c.offer_out||0)+(c.under_contract||0)}</b><em>${c.offer_out||0} out · ${c.under_contract||0} accepted</em></div>`;
 
   document.getElementById("alist").innerHTML = (d.order || []).map(stage => {
@@ -2299,7 +2299,7 @@ async function viewAssigned() {
         ${r.last_outcome?`<div class="meta">Last: ${esc(r.last_seen||"")} — ${esc(String(r.last_outcome).replace(/_/g," "))}</div>`:""}
         ${r.offer?`<div class="meta">Offer ${$(r.offer.price)} on ${esc(r.offer.address||"")}</div>`:""}
       </div>`).join("")}</div></div>`;
-  }).join("") || `<div class="card"><div class="body"><div class="empty">Nothing is assigned yet.</div></div></div>`;
+  }).join("") || `<div class="card"><div class="body"><div class="empty">🎉 Nobody is sitting with an empty calendar. Booked tours are on <a href="#/showings" style="color:var(--blue)">Showings</a>.</div></div></div>`;
 }
 async function viewShowings() {
   V().innerHTML = `<h1>Showings</h1>
@@ -2320,19 +2320,19 @@ async function viewShowings() {
     const [lbl, cls] = LBL[r.stage] || ["", "st-waiting"];
     return `<div class="row" style="border-left:3px solid ${r.stage==="needs_agent"?"var(--red)":r.stage==="verified"?"var(--green)":"var(--line)"};padding-left:10px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="whoName">${esc(r.client)}</span>
+        <a href="#/clients" onclick="jumpToLead('${r.lead_id}')" class="whoName" style="color:var(--blue);cursor:pointer">${esc(r.client)}</a>
         <span class="st ${cls}">${lbl}</span>
         ${r.agent ? `<span class="kind ${r.agent_is_team?"lane-agent":""}">${esc(r.agent)}${r.agent_is_team?" (in-house)":""}</span>` : ""}
         ${r.has_offer ? `<span class="st st-answered">💰 offer in</span>` : ""}
         <span style="flex:1"></span>
-        ${(r.stage==="needs_agent"||r.stage==="not_booked") ? `<button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${r.lead_id}')">📅 Book it</button>` : ""}
-        ${r.showing_id && !r.outcome ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="editShowing('${r.showing_id}','${esc(String(r.address||"").replace(/'/g,""))}','${r.scheduled_at||""}',${r.duration_minutes||45})">✏️ Edit</button>` : ""}
+        ${!r.outcome ? (r.showing_id
+          ? `<button style="padding:4px 11px;font-size:11.5px" onclick="editShowing('${r.showing_id}','${esc(String(r.address||"").replace(/'/g,""))}','${r.scheduled_at||""}',${r.duration_minutes||45})">✏️ Edit showing</button>`
+          : `<button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${r.lead_id}')">✏️ Edit showing</button>`) : ""}
         ${!r.outcome ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="cancelShowing('${r.showing_id||""}','${r.id}','${esc(String(r.client||"").replace(/'/g,""))}')">❌ Cancel</button>` : ""}
         <button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="nurtureLead('${r.lead_id}')">🌱 Nurture</button>
         ${!r.has_offer ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Make an offer</button>` : ""}
-        <a class="btn ghost" style="padding:4px 10px;font-size:11.5px;margin-left:6px;text-decoration:none" href="#/clients" onclick="jumpToLead('${r.lead_id}')">Open lead</a>
       </div>
-      <div class="meta">${esc(r.address||"(no address)")}${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
+      <div class="meta"><a href="#/clients" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);cursor:pointer">${esc(r.address||"(no address)")}</a>${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
       ${r.feedback?`<div class="meta">Feedback: <i>${esc(r.feedback)}</i></div>`:""}</div>`;
   }).join("") : `<div class="empty">No showings booked yet.</div>`;
 }
