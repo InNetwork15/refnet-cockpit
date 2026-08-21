@@ -23,7 +23,15 @@ body{margin:0;font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",Ro
 .spacer{flex:1}
 .who{font-size:12px;color:#6b7787;text-align:right;line-height:1.3;margin-right:10px}
 .who b{color:var(--brand);display:block;font-weight:700}
-.ava{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--brand);background:var(--brand);color:#fff;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.5px}
+/* Josh 2026-08-21: "i need the Letters to be centered in the bubble for the users intiials."
+   Three things were shoving them off-centre and all three had to go:
+   - it is a <button>, so it carried the browser's default padding and its own system font
+   - nothing ever centred it: no flex, and the default line-height left a half-leading gap on top
+   - letter-spacing puts its space AFTER the last letter too, so "TW" carried dead air on the
+     right and the pair sat visibly left of centre. text-indent puts that space back on the left.
+   flex:none is here so the flex header can never squash the circle into an oval. */
+.ava{width:34px;height:34px;flex:none;border-radius:50%;border:1.5px solid var(--brand);background:var(--brand);color:#fff;font-weight:800;font-size:12.5px;cursor:pointer;letter-spacing:.5px;
+  display:inline-flex;align-items:center;justify-content:center;padding:0;line-height:1;text-indent:.5px;font-family:inherit}
 .wrap{max-width:1280px;margin:0 auto;padding:18px 22px}
 h1{font-size:24px;margin:0 0 3px;font-weight:780;letter-spacing:-.02em;color:var(--brand)}
 .sub{color:var(--muted);font-size:13px;margin-bottom:18px}
@@ -224,23 +232,14 @@ async function pollBots() {
     // nobody is looking, so it earns the space. The other three answered questions nobody was asking
     // from up here.
     const SHOW = new Set(["ai"]);
-    // Quiet when it is fine, loud when it is not. The old pill said "everything is normal" with a
-    // green dot AND green text AND a green capsule AND a pink brain -- four things competing to
-    // deliver one unremarkable number, which is why fourteen cents looked like an alarm. Now the
-    // money is the only thing with weight, the label sits back in grey, and colour is held in
-    // reserve: the dot appears and the number turns amber ONLY when the day crosses the line.
     el.innerHTML = (d.pills || []).filter(function (p) { return SHOW.has(p.key); }).map(function (p) {
-      const ok  = p.state === "ok";
-      const c   = PILLC[p.state] || "#5f6e8a";
-      const lab = p.key === "ai" ? "AI today" : esc(p.label);
+      const c = PILLC[p.state] || "#5f6e8a";
       return '<span class="botpill" data-k="' + p.key + '" title="' + esc(p.tip) + '"'
-        + ' style="display:inline-flex;align-items:center;gap:7px;font-size:12.5px;'
-        + 'background:' + (ok ? "#fff" : c + "0f") + ';border:1px solid ' + (ok ? "var(--line)" : c + "3d")
-        + ';border-radius:999px;padding:5px 11px;white-space:nowrap;cursor:pointer">'
-        + (ok ? "" : '<span style="width:6px;height:6px;border-radius:50%;background:' + c + ';flex:none"></span>')
-        + '<span style="color:var(--muted);font-weight:600">' + lab + '</span>'
-        + '<b style="color:' + (ok ? "var(--ink)" : c) + ';font-weight:700;font-variant-numeric:tabular-nums">'
-        + esc(p.value) + '</b></span>';
+        + ' style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:' + c
+        + ';background:' + c + '14;border:1px solid ' + c + '44;border-radius:999px;padding:4px 10px;'
+        + 'white-space:nowrap;cursor:pointer;margin-right:6px">'
+        + '<span style="width:7px;height:7px;border-radius:50%;background:' + c + ';flex:none"></span>'
+        + p.emoji + " " + esc(p.label) + " · " + esc(p.value) + "</span>";
     }).join("");
     el.querySelectorAll(".botpill").forEach(function (n) { n.onclick = function () { openBots(n.dataset.k); }; });
   } catch (e) { /* the header never breaks the app */ }
