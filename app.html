@@ -1105,13 +1105,18 @@ window.logPayment = async (id, i) => {
    recruiting jobs -- NOT the funnel's stage column, which disagreed with reality (it said 7
    needed coverage when the real answer was 6). A board that argues with itself gets ignored. */
 async function viewBoard() {
+  // Pipeline is the front of the funnel only. The "assigned" and "showings booked" lanes moved to
+  // their own pages on 2026-08-20 and showing them here as well was duplication of exactly the kind
+  // Josh asked to be rid of -- three places telling you the same thing, none of them authoritative.
+  // What belongs here is the emergency (nobody owns it) and the machine working on it (recruiting),
+  // plus a map of where everything goes next.
   V().innerHTML = `<h1>Pipeline</h1>
-    <div class="sub">Every lead that wants a tour, and whose hands it is in right now.</div>
+    <div class="sub">The front of the funnel — what nobody owns yet, and what the recruiter is doing about it.</div>
+    <div id="pflow"></div>
     <div id="ptiles" class="ztiles"></div>
     <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>
-    <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>
-    <div class="card"><h2>✅ Assigned — is anything happening?</h2><div class="body" id="p3">…</div></div>
-    <div class="card"><h2>📅 Showings on the books</h2><div class="body" id="p4">…</div></div>`;
+    <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>`;
+  drawFlow();
   await drawBoard();
   window.__boardPoll = setInterval(() => {
     if (!location.hash.startsWith("#/board") && location.hash !== "" && location.hash !== "#/") {
@@ -1123,6 +1128,39 @@ async function viewBoard() {
 /* Alerts lived on Home and nowhere else, so deleting Home would have deleted the only place they
    could be seen or resolved. They belong next to the pipeline anyway -- an alert is a thing that
    has gone wrong with the work on this page. */
+/* HOW A LEAD MOVES (Josh 2026-08-20: "make sure I know how things are going to flow in here").
+   Live counts, not a diagram -- every number is the real one and every step is a link, so the map
+   doubles as the thing you steer by. A step glows amber when it is holding work that is waiting on
+   a person rather than on a client. */
+async function drawFlow() {
+  const el = document.getElementById("pflow"); if (!el) return;
+  const [b, a] = await Promise.all([
+    lapi("&section=pipeline").catch(() => ({})),
+    lapi("&section=assigned").catch(() => ({})),
+  ]);
+  const c = b.counts || {}, k = a.counts || {};
+  const step = (icon, label, n, href, warn, note) => `
+    <a href="${href}" style="flex:1;min-width:132px;text-decoration:none;background:#fff;border:1px solid ${warn?"#f0dfae":"var(--line)"};
+       ${warn?"background:#fffdf6;":""}border-radius:12px;padding:10px 12px;display:block">
+      <div class="meta" style="font-size:11px">${icon} ${label}</div>
+      <div style="font-size:22px;font-weight:800;color:${warn?"var(--amber)":"var(--brand)"};line-height:1.2">${n}</div>
+      <div class="meta" style="font-size:10.5px">${note}</div></a>`;
+  el.innerHTML = `<div class="card" style="background:#fbfcfe"><div class="body">
+    <div class="meta" style="margin-bottom:7px"><b>How a lead moves</b> — every number is live, every box is a link</div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap;align-items:stretch">
+      ${step("📥","Leads", c.uncovered ?? 0, "#/leads", (c.uncovered ?? 0) > 0, "need an agent")}
+      ${step("👤","Assigned", k.needs_showing ?? 0, "#/assigned", (k.needs_showing ?? 0) > 0, "nothing booked yet")}
+      ${step("📅","Showings", k.booked ?? 0, "#/showings", false, "on the calendar")}
+      ${step("📝","Debrief", k.needs_debrief ?? 0, "#/assigned", (k.needs_debrief ?? 0) > 0, "shown, not logged")}
+      ${step("💰","Offers", k.offer_out ?? 0, "#/offers", false, "waiting on an answer")}
+      ${step("🏁","Under contract", k.under_contract ?? 0, "#/offers", false, "hand to INRE")}
+    </div>
+    <div class="meta" style="margin-top:8px">
+      A tour that does not land goes to <b>🌱 nurture</b> (${k.nurturing ?? 0}) and can come back to a showing at any time.
+      A client we hand over entirely is <b>🤝 referred out</b> (${k.referred ?? 0}). Amber means someone here is holding it up.
+    </div>
+  </div></div>`;
+}
 async function drawBoard(silent) {
   const d = await lapi("&section=pipeline");
   if (!document.getElementById("p1")) return;
@@ -1160,7 +1198,7 @@ async function drawBoard(silent) {
     : `<div class="empty">No recruiting running.</div>`;
 
   // 3 — assigned. The question here is not "who" but "and then what".
-  document.getElementById("p3").innerHTML = (d.assigned || []).length
+  (document.getElementById("p3")||{}).innerHTML = (d.assigned || []).length
     ? d.assigned.map(a => `<div class="row" style="border-left:3px solid ${a.has_showing_booked ? "var(--green)" : "var(--amber)"};padding-left:10px">
         <div><b>${esc(a.name)}</b> → <b>${esc(a.agent)}</b>${a.is_team ? ' <span class="kind">in-house</span>' : ""}
           ${a.has_showing_booked ? '<span class="kind lane-agent">showing booked</span>' : '<span class="kind" style="background:#fdf1dc;color:#8a5a00">no showing booked yet</span>'}</div>
@@ -1170,7 +1208,7 @@ async function drawBoard(silent) {
     : `<div class="empty">Nothing assigned yet.</div>`;
 
   // 4 — showings. Past-but-unverified sits at the top, because that is money that cannot be paid.
-  document.getElementById("p4").innerHTML = (d.showings || []).length
+  (document.getElementById("p4")||{}).innerHTML = (d.showings || []).length
     ? d.showings.slice().sort((x, y) => Number(y.past) - Number(x.past)).map(s => `<div class="row">
         <div><b>${esc(s.property || "")}</b> ${s.past ? '<span class="kind hot">past — needs verifying</span>' : `<span class="kind lane-agent">in ${wait(s.hours_away)}</span>`}</div>
         <div class="meta">${et(s.scheduled_at)} · ${esc(s.client || "client")} with ${esc(s.agent || "an agent")} · ${s.confirmed ? "confirmed" : "not confirmed by the agent"}</div>
