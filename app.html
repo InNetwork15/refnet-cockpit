@@ -1112,14 +1112,14 @@ async function viewBoard() {
   // Pipeline is the front of the funnel only. The "assigned" and "showings booked" lanes moved to
   // their own pages on 2026-08-20 and showing them here as well was duplication of exactly the kind
   // Josh asked to be rid of -- three places telling you the same thing, none of them authoritative.
-  // What belongs here is the emergency (nobody owns it) and the machine working on it (recruiting),
-  // plus a map of where everything goes next.
+  // Recruiting-in-flight went the same way on 2026-08-20 ("pipeline get rid of the recruiting in
+  // flight") -- it was a second copy of the Recruiting tab. What is left is the emergency lane and
+  // a map of where everything goes next, which is the whole job of this page.
   V().innerHTML = `<h1>Pipeline</h1>
-    <div class="sub">The front of the funnel — what nobody owns yet, and what the recruiter is doing about it.</div>
+    <div class="sub">The front of the funnel — who needs an agent right now, and where everything goes next.</div>
     <div id="pflow"></div>
     <div id="ptiles" class="ztiles"></div>
-    <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>
-    <div class="card"><h2>🤝 Recruiting in flight</h2><div class="body" id="p2">…</div></div>`;
+    <div class="card"><h2>🚨 Nobody on it</h2><div class="body" id="p1">Loading…</div></div>`;
   drawFlow();
   await drawBoard();
   window.__boardPoll = setInterval(() => {
@@ -1238,7 +1238,6 @@ async function drawBoard(silent) {
 
   document.getElementById("ptiles").innerHTML =
     `<div class="ztile"><span>Nobody on it</span><b style="color:${c.uncovered ? "var(--red)" : "var(--green)"}">${c.uncovered ?? 0}</b><em>want a tour, unassigned</em></div>
-     <div class="ztile"><span>Recruiting</span><b>${c.recruiting ?? 0}</b><em>jobs running</em></div>
      <div class="ztile"><span>Assigned</span><b>${c.assigned ?? 0}</b><em>someone owns it</em></div>
      <div class="ztile"><span>Showings booked</span><b>${c.showings ?? 0}</b><em>on the calendar</em></div>
      <div class="ztile"><span>Not waiting on us</span><b>${c.no_agent_needed ?? 0}</b><em>of ${c.leads_live ?? 0} live — questions & nurture</em></div>`;
@@ -1253,18 +1252,9 @@ async function drawBoard(silent) {
         </div>`).join("")
     : `<div class="empty">Everyone who wants a tour has someone on it. 🎉</div>`;
 
-  // 2 — recruiting, with the follow-up numbers that say whether it is actually moving
-  document.getElementById("p2").innerHTML = (d.recruiting || []).length
-    ? `<div style="overflow-x:auto"><table><tr><th>City</th><th>For</th><th>Open</th><th>Candidates</th><th>Texted</th><th>Said no</th><th>Left</th><th></th></tr>`
-      + d.recruiting.map(j => `<tr${j.contacted === 0 && j.hours_open > 24 ? ' style="background:#fffaf3"' : ""}>
-          <td><b>${esc(j.city || "?")}</b></td>
-          <td class="meta">${esc(j.lead || "—")}</td>
-          <td class="meta">${wait(j.hours_open)}${j.contacted === 0 && j.hours_open > 24 ? ' <span class="kind hot">nobody texted yet</span>' : ""}</td>
-          <td>${j.candidates}</td><td>${j.contacted}</td><td>${j.declined || 0}</td>
-          <td><b>${j.left}</b></td>
-          <td>${j.lead_id ? `<a class="btn ghost" style="padding:4px 9px;font-size:11px;text-decoration:none" href="#/agents">Open bench</a>` : ""}</td>
-        </tr>`).join("") + `</table></div>`
-    : `<div class="empty">No recruiting running.</div>`;
+  // Josh 2026-08-20: "pipeline get rid of the recruiting in flight." It was a second copy of
+  // the Recruiting page, which has been its own tab since 2026-08-19. Pipeline is for what needs a
+  // decision from a person; the recruiter working through a bench does not.
 
   // 3 — assigned. The question here is not "who" but "and then what".
   (document.getElementById("p3")||{}).innerHTML = (d.assigned || []).length
