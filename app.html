@@ -1245,9 +1245,9 @@ async function drawBoard(silent) {
 
   // 1 — nobody on it. The only lane that is an emergency.
   document.getElementById("p1").innerHTML = (d.uncovered || []).length
-    ? `<div class="meta" style="margin-bottom:8px">Longest wait first. Each one wants to see a house and has no agent and no recruiting running.</div>`
+    ? `<div class="meta" style="margin-bottom:8px">Longest wait first. Each one asked to see a house and <b>still needs an agent</b>. A recruiting job only counts as covered once somebody has actually been texted — an empty job is a placeholder.${d.counts && d.counts.also_waiting ? ` <a href="#/leads" style="color:var(--blue)">${d.counts.also_waiting} more undecided lead${d.counts.also_waiting===1?"":"s"}</a> did not explicitly ask for a tour and are waiting on the Leads inbox.` : ""}</div>`
       + d.uncovered.map(u => `<div class="row" style="border-left:3px solid var(--red);padding-left:10px">
-          <div><b>${esc(u.name)}</b> <span class="kind hot">waiting ${wait(u.hours_waiting)}</span></div>
+          <div><b>${esc(u.name)}</b> <span class="kind hot">waiting ${wait(u.hours_waiting)}</span>${u.job_open ? `<span class="st st-needs" title="A recruiting job is open for them but nobody has been texted yet, so this is still your move">🤝 job open, ${u.job_candidates ? u.job_candidates + " found, none texted" : "nobody found yet"}</span>` : ""}</div>
           <div class="meta">${esc(u.property || "(no address)")}${u.price ? " · $" + Number(u.price).toLocaleString() : ""} · ${esc(String(u.intent || "").replace(/_/g, " "))}</div>
           <div style="margin-top:6px"><a class="btn ghost" style="text-decoration:none" href="#/clients" onclick="jumpToLead('${u.lead_id}')">Open lead → assign or recruit</a></div>
         </div>`).join("")
