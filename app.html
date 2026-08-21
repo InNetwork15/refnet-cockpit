@@ -1135,6 +1135,71 @@ async function viewBoard() {
    Live counts, not a diagram -- every number is the real one and every step is a link, so the map
    doubles as the thing you steer by. A step glows amber when it is holding work that is waiting on
    a person rather than on a client. */
+/* AGENTS ON THE MAP (Josh 2026-08-20: "toggle and see Agents as a datapoint... Team Agents,
+   Showing Agents, Referral Agents").
+
+   Two kinds of mark, and the difference is not cosmetic. A PIN is a person at an address we
+   actually hold. A CIRCLE is a town we have recruited agents for, drawn on the town rather than on
+   anyone's house, sized by how many.
+
+   Only the four team agents have addresses. Referral partners have none, our one showing partner
+   has none. Plotting only pins would draw four dots across Michigan and read as "we have no
+   coverage", which is the opposite of true -- there are 31 towns with a bench behind them. So the
+   panel draws both and names the people it could not place, so an empty patch of map reads as
+   missing data rather than as a hole in coverage. */
+window.AMAP = null;
+async function drawAgentMap() {
+  const host = document.getElementById("amap"); if (!host) return;
+  host.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);font-size:12.5px">
+      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-team" checked> <b style="color:#1554b0">●</b> Team</label>
+      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-show" checked> <b style="color:#0fb5a6">●</b> Showing partners</label>
+      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-ref" checked> <b style="color:#7c3aed">●</b> Referral partners</label>
+      <label style="display:inline-flex;align-items:center;gap:5px"><input type="checkbox" id="ly-bench" checked> <b style="color:#b8770a">○</b> Recruiting bench, by town</label>
+      <span class="meta" id="ly-note" style="margin-left:auto"></span>
+    </div><div id="amapc" style="height:396px"></div>`;
+
+  await loadLeaflet();
+  const d = await lapi("&section=agent_map");
+  if (d.error) { document.getElementById("amapc").innerHTML = `<div class="empty" style="padding:16px">${esc(d.error)}</div>`; return; }
+
+  const map = L.map("amapc", { scrollWheelZoom: false }).setView([44.3, -85.4], 6);
+  window.AMAP = map;
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: "© OpenStreetMap © CARTO", maxZoom: 18 }).addTo(map);
+
+  const layer = (rows, colour, label) => {
+    const g = L.layerGroup();
+    rows.forEach(a => {
+      if (a.lat == null) return;
+      L.circleMarker([a.lat, a.lng], { radius: 7, color: colour, fillColor: colour, fillOpacity: .85, weight: 2 })
+        .bindTooltip(`<b>${esc(a.name)}</b><br>${label}${a.brokerage ? "<br>" + esc(a.brokerage) : ""}${a.address ? "<br>" + esc(a.address) : ""}`)
+        .addTo(g);
+    });
+    return g;
+  };
+  const gTeam = layer(d.team || [], "#1554b0", "team agent");
+  const gShow = layer(d.showing || [], "#0fb5a6", "showing partner");
+  const gRef  = layer(d.referral || [], "#7c3aed", "referral partner");
+
+  const gBench = L.layerGroup();
+  (d.towns || []).forEach(t => {
+    L.circleMarker([t.lat, t.lng], {
+      radius: Math.max(7, Math.min(26, 5 + Math.sqrt(t.agents) * 3.4)),
+      color: "#b8770a", fillColor: "#b8770a", fillOpacity: .18, weight: 1.5,
+    }).bindTooltip(`<b>${esc(t.town)}</b><br>${t.agents} agent${t.agents===1?"":"s"} recruited<br>${t.texted} contacted<br><i>placed on the town, not an address</i>`).addTo(gBench);
+  });
+
+  [gBench, gTeam, gShow, gRef].forEach(g => g.addTo(map));
+  const bind = (id, g) => { const b = document.getElementById(id);
+    b.onchange = () => b.checked ? g.addTo(map) : map.removeLayer(g); };
+  bind("ly-team", gTeam); bind("ly-show", gShow); bind("ly-ref", gRef); bind("ly-bench", gBench);
+
+  const m = d.missing || {};
+  const cant = [...(m.team||[]), ...(m.showing||[]), ...(m.referral||[])];
+  document.getElementById("ly-note").innerHTML = cant.length
+    ? `⚠ no address on file, so not shown: <b>${esc(cant.join(", "))}</b>`
+    : "every agent is on the map";
+  setTimeout(() => map.invalidateSize(), 40);
+}
 async function drawFlow() {
   const el = document.getElementById("pflow"); if (!el) return;
   const [b, a] = await Promise.all([
@@ -1759,14 +1824,14 @@ async function viewZips() {
       <h2 style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">🗺️ The map
         <span style="flex:1"></span>
         <button id="mv-leads" class="btn" style="padding:4px 11px;font-size:11.5px">Lead density</button>
-        <button id="mv-agents" class="btn ghost" style="padding:4px 11px;font-size:11.5px">Agent coverage</button></h2>
+        <button id="mv-agents" class="btn ghost" style="padding:4px 11px;font-size:11.5px">Agents</button></h2>
       <div class="body" style="padding:0">
         <div id="zmap" style="height:440px;border-radius:0 0 16px 16px"></div>
         <div id="amap" style="display:none;height:440px"></div>
       </div></div>
     <div class="card"><h2>📋 Every ZIP, every window</h2><div class="body" id="ztable">…</div></div>`;
-  // Two views of the same ground: bubbles = where the leads come from, circles = who can reach
-  // them. The agent map is an iframe and only loads when asked for, so the page is not paying for
+  // Two views of the same ground: bubbles = where the leads come from, pins and circles = who can reach
+  // them. The agent map builds only when asked for, so the page is not paying for
   // a second map nobody looked at.
   {
     const bl = document.getElementById("mv-leads"), ba = document.getElementById("mv-agents");
@@ -1777,10 +1842,8 @@ async function viewZips() {
     ba.onclick = () => {
       zm.style.display = "none"; am.style.display = "";
       bl.className = "btn ghost"; ba.className = "btn";
-      if (!am.dataset.loaded) {
-        am.innerHTML = `<iframe src="map.html#${MAP_VIEW_TOKEN}" style="width:100%;height:100%;border:0"></iframe>`;
-        am.dataset.loaded = "1";
-      }
+      if (!am.dataset.loaded) { am.dataset.loaded = "1"; drawAgentMap(); }
+      else if (window.AMAP) setTimeout(() => window.AMAP.invalidateSize(), 30);
     };
   }
   const d = await zapi("&section=zip_report" + (ZLANE ? "&lane=" + ZLANE : ""));
