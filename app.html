@@ -163,8 +163,8 @@ const MODULES = [
   // answers the same question (what is happening, whose hands is it in) with the actual work.
   { id:"board",     nav:"Pipeline",     match: h => h.startsWith("#/board") || h === "#/" || h === "#" || h === "", render: () => viewBoard() },
   { id:"owed",      nav:"Owed",      match: h => h.startsWith("#/owed"),      render: () => viewOwed() },
-  { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"clients",   nav:"Clients",   match: h => h.startsWith("#/clients"),   render: () => viewClients() },
+  { id:"leads",     nav:"Leads",     match: h => h.startsWith("#/leads"),     render: () => viewLeads() },
   { id:"assigned",  nav:"Assigned",  match: h => h.startsWith("#/assigned"),  render: () => viewAssigned() },
   { id:"showings",  nav:"Showings",  match: h => h.startsWith("#/showings"),  render: () => viewShowings() },
   { id:"offers",    nav:"Offers",    match: h => h.startsWith("#/offers"),    render: () => viewOffers() },
