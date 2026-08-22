@@ -1845,7 +1845,7 @@ window.openAssignBox = async () => {
   const L = (window.__lead && window.__lead.lead) || {};
   const d = await lapi("", { method: "POST", body: JSON.stringify({ action: "assignable_agents", lead_id: L.id }) });
   if (d.error) { box.innerHTML = '<div class="meta">' + esc(d.error) + '</div>'; return; }
-  window.__assign = d; ASEL = null;
+  window.__assign = d; ASEL = null; window.__assignRole = null;
   drawAssignBox();
 };
 const AKIND = {
@@ -1853,6 +1853,39 @@ const AKIND = {
   partner:  ["showing partner",   "#0fb5a6",       "Opens the door for a fee. A payable accrues."],
   referral: ["referral partner",  "var(--purple)", "Takes the whole client. Referral fee on their side."],
 };
+/* Josh 2026-08-21: "the agent is Brandi and she is both a showing agent and a referring agent. We
+   need options for that."
+   An agent who can do two things gets asked which one. The two are not variations on a theme --
+   one opens a door for a fee and we keep the client, the other hands the client away for good --
+   so the choice is made HERE, before the address and the time, and it is what the confirmation
+   and the button then talk about. An agent who can only do one thing shows no chooser at all. */
+const AROLE = () => (window.__assign && window.__assign.agents.find(a => a.id === ASEL)) || null;
+function agentRoles(a) { return (a && a.kinds && a.kinds.length) ? a.kinds : [a ? a.kind : "partner"]; }
+function activeRole(a) {
+  const roles = agentRoles(a);
+  return roles.includes(window.__assignRole) ? window.__assignRole : roles[0];
+}
+window.pickRole = (r) => { window.__assignRole = r; drawAssignBox(); };
+function roleChooser(a) {
+  const roles = agentRoles(a), cur = activeRole(a);
+  const [, colour, blurb] = AKIND[cur] || ["", "var(--line)", ""];
+  const fee = cur === "referral"
+    ? (a.referral_fee_pct != null ? ` <b>${a.referral_fee_pct}% referral fee</b>`
+                                  : " <b>Referral fee not set on their profile.</b>") : "";
+  if (roles.length < 2) return `<div class="meta" style="margin-top:3px">${blurb}${fee}</div>`;
+  return `<div style="margin-top:6px">
+    <div class="meta" style="margin-bottom:4px"><b>${esc(a.name.split(" ")[0])} can do both — which is this?</b></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${roles.map(r => {
+      const [lab, col] = AKIND[r] || [r, "var(--line)"];
+      const on = r === cur;
+      return `<span onclick="event.stopPropagation();pickRole('${r}')"
+        style="cursor:pointer;font-size:11.5px;font-weight:700;padding:4px 11px;border-radius:999px;
+        border:1.5px solid ${on ? col : "var(--line)"};background:${on ? col : "#fff"};
+        color:${on ? "#fff" : "#5f6e8a"}">${on ? "● " : ""}${lab}</span>`;
+    }).join("")}</div>
+    <div class="meta" style="margin-top:4px;border-left:2px solid ${colour};padding-left:7px">${blurb}${fee}</div>
+  </div>`;
+}
 function drawAssignBox() {
   const d = window.__assign, box = document.getElementById("assignbox");
   if (!d || !box) return;
@@ -1861,13 +1894,16 @@ function drawAssignBox() {
   const b = d.bench;
 
   const rows = d.agents.map(a => {
-    const [label, colour, blurb] = AKIND[a.kind] || [a.kind, "var(--line)", ""];
     const on = a.id === ASEL;
+    // The stripe follows the role actually chosen, not the agent's first one. On a dual-role agent
+    // that stripe is the difference between "opens a door" and "we never see this client again".
+    const [label, colour, blurb] = AKIND[on ? activeRole(a) : a.kind] || [a.kind, "var(--line)", ""];
     return `<div onclick="pickAgent('${a.id}')" style="cursor:pointer;border:1px solid ${on ? colour : "var(--line)"};
         ${on ? "background:#f7fbff;" : ""}border-left:3px solid ${colour};border-radius:10px;padding:8px 11px;margin-bottom:5px">
       <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
         <span style="font-weight:${on ? 800 : 600}">${on ? "● " : "○ "}${esc(a.name)}</span>
-        <span class="kind" style="background:${colour};color:#fff">${label}</span>
+        ${agentRoles(a).map(r => { const [lb, cl] = AKIND[r] || [r, "var(--line)"];
+          return `<span class="kind" style="background:${cl};color:#fff">${lb}</span>`; }).join("")}
         ${a.brokerage ? `<span class="meta">${esc(a.brokerage)}</span>` : ""}
         <span style="flex:1"></span>
         ${a.miles != null ? `<span class="kind">${a.miles} mi away</span>`
@@ -1875,7 +1911,7 @@ function drawAssignBox() {
         <span class="kind" title="Leads they are already carrying">${a.load ? a.load + " on their plate" : "nothing on their plate"}</span>
         ${a.reachable ? "" : '<span class="kind hot">no phone — cannot be told</span>'}
       </div>
-      ${on ? `<div class="meta" style="margin-top:3px">${blurb}${a.kind === "referral" && a.referral_fee_pct != null ? ` <b>${a.referral_fee_pct}% referral fee</b>` : ""}${a.kind === "referral" && a.referral_fee_pct == null ? " <b>Referral fee not set on their profile.</b>" : ""}</div>` : ""}
+      ${on ? roleChooser(a) : ""}
     </div>`;
   }).join("");
 
@@ -1888,10 +1924,10 @@ function drawAssignBox() {
         ${addrs.map(a => `<option value="${esc(a)}">${esc(a)}</option>`).join("")}
         <option value="__manual__">— type a different address —</option></select>
       <input id="amanual" placeholder="Street, City" style="display:${addrs.length ? "none" : "block"};margin-bottom:6px">
-      ${sel.kind === "referral"
+      ${activeRole(sel) === "referral"
         ? `<input id="anote" placeholder="Anything ${esc(sel.name.split(" ")[0])} should know? (optional)" style="margin-bottom:8px">`
         : `<input id="atime" placeholder="When? e.g. Fri, Aug 22nd 12:30pm (optional)" style="margin-bottom:8px">`}
-      <button onclick="submitAssign()">${sel.kind === "referral" ? "🤝 Hand the client to " + esc(sel.name.split(" ")[0]) : "👤 Assign to " + esc(sel.name.split(" ")[0])}</button>
+      <button onclick="submitAssign()">${activeRole(sel) === "referral" ? "🤝 Hand the client to " + esc(sel.name.split(" ")[0]) : "👤 Assign to " + esc(sel.name.split(" ")[0])}</button>
       <button class="btn ghost" style="margin-left:6px" onclick="document.getElementById('assignbox').style.display='none'">Cancel</button>`
       : `<div class="meta" style="margin-top:6px">Pick somebody above.</div>`}
     <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
@@ -1905,7 +1941,9 @@ function drawAssignBox() {
   const s = document.getElementById("aaddr");
   if (s) s.onchange = () => { document.getElementById("amanual").style.display = s.value === "__manual__" ? "block" : "none"; };
 }
-window.pickAgent = (id) => { ASEL = (ASEL === id ? null : id); drawAssignBox(); };
+// Changing agent clears the chosen role: carrying "referral" over to the next person would preload
+// the most consequential option for somebody you have not considered in that light yet.
+window.pickAgent = (id) => { ASEL = (ASEL === id ? null : id); window.__assignRole = null; drawAssignBox(); };
 window.submitAssign = async () => {
   const d = window.__assign, a = d && d.agents.find(x => x.id === ASEL);
   if (!a) { alert("Pick an agent first."); return; }
@@ -1913,15 +1951,18 @@ window.submitAssign = async () => {
   const address = (!selA || selA.value === "__manual__") ? ((man && man.value) || "").trim() : selA.value;
   const first = (window.__lead && window.__lead.lead && window.__lead.lead.first_name) || "this client";
   // Referring is the one that is hard to walk back -- it gives the relationship away -- so it is
-  // the one that spells out the consequence before you commit.
-  const warn = a.kind === "referral"
+  // the one that spells out the consequence before you commit. For an agent who can do both, the
+  // warning has to describe the role that was PICKED, not the one they happen to rank first --
+  // otherwise the confirmation quietly describes a different deal from the one about to happen.
+  const role = activeRole(a);
+  const warn = role === "referral"
     ? `Hand ${first} to ${a.name}?\n\nThey own the relationship from here. No showing fee accrues to us; a referral fee is owed on their side. Any recruiting we had open closes.`
-    : a.kind === "partner"
+    : role === "partner"
       ? `Assign ${first} to ${a.name}?\n\nThey are an outside showing partner, so a showing fee will accrue on this placement. They get an automatic text.`
       : `Assign ${first} to ${a.name}?\n\nThey are on our team — no fee accrues. They get an automatic text.`;
   if (!confirm(warn)) return;
   const r = await lapi("", { method: "POST", body: JSON.stringify({
-    action: "assign_lead", lead_id: window.__lead.lead.id, agent_id: a.id,
+    action: "assign_lead", lead_id: window.__lead.lead.id, agent_id: a.id, as_kind: role,
     property_address: address || null,
     showing_time: (document.getElementById("atime") || {}).value || null,
     note: (document.getElementById("anote") || {}).value || null,
