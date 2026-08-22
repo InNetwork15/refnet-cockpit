@@ -1546,13 +1546,24 @@ function renderTimelineItem(t) {
   const parts = [];
   // Who else is reading this. On a group thread the client sees whatever you type about them, so
   // this belongs at the TOP of the bubble, before the message, not tucked in the timestamp line.
-  if (t.group_with && t.group_with.length) {
+  // Never name the speaker as somebody they are "with" -- on Brandi's own message that read
+  // "Group — with Brandi Stupica" directly above her name.
+  const others = (t.group_with || []).filter(n => n !== t.from_name);
+  if (others.length) {
     parts.push('<div style="font-size:11.5px;font-weight:700;opacity:.85;margin-bottom:3px">'
-      + "👥 Group — with " + esc(t.group_with.join(", ")) + "</div>");
+      + "👥 Group — with " + esc(others.join(", ")) + "</div>");
+  } else if (t.group_with && t.group_with.length) {
+    parts.push('<div style="font-size:11.5px;font-weight:700;opacity:.85;margin-bottom:3px">👥 Group thread</div>');
   }
   if (t.kind !== "text") {
     parts.push('<div style="font-weight:700;font-size:12px;margin-bottom:3px">' + icon + " "
       + (t.kind === "email" ? esc(t.subject || "(no subject)") : "Call") + "</div>");
+  }
+  // Somebody who is neither us nor the client -- the agent, talking on the group thread. Named,
+  // because an unlabelled grey bubble in a client's thread reads as the client saying it.
+  if (t.from_name) {
+    parts.push('<div style="font-weight:700;font-size:12px;margin-bottom:3px;color:#0f766e">'
+      + esc(t.from_name) + "</div>");
   }
   parts.push(esc((t.body || "").trim().slice(0, 1500)));
   if (t.call_summary) parts.push('<div style="margin-top:5px;font-size:12px;background:rgba(255,255,255,.55);border-radius:8px;padding:6px"><b>Summary:</b> ' + esc(t.call_summary) + "</div>");
