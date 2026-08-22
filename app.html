@@ -560,11 +560,15 @@ async function loadMailThread(t, silent) {
       : d.reply_state==="answered"
       ? `<div class="statebar answered">✓ Responded ${et(d.answered_at)}${d.answered_by==="ai"?" — sent automatically":" — sent by you"}.</div>`
       : `<div class="statebar waiting">↻ We wrote first — no reply from them yet.</div>`}
-    <div id="msgs">${(d.messages||[]).slice().reverse().map(m => `<div class="bub ${m.direction==="out"?"out":""}" style="max-width:86%">
-        <div style="font-weight:700;font-size:12px;margin-bottom:3px">${esc(m.subject||"(no subject)")}</div>
-        ${esc((m.body_text || m.snippet || "").slice(0, 4000))}
-        ${m.has_attachments?`<div style="font-size:11px;margin-top:4px">📎 ${(m.attachments||[]).map(a=>esc(a.filename)).join(", ")}</div>`:""}
-        <span class="meta">${m.direction==="out"?"sent":esc(m.from_email||"")} · ${et(m.occurred_at)}</span></div>`).join("")}</div>
+    <div id="msgs">${(d.messages||[]).slice().reverse().map(m =>
+      // Joined, not laid out: .bub is pre-wrap, so indentation inside this template would render
+      // as blank lines in the bubble. Same trap that emptied the texts on the lead page.
+      '<div class="bub ' + (m.direction==="out"?"out":"") + '" style="max-width:86%">'
+      + '<div style="font-weight:700;font-size:12px;margin-bottom:3px">' + esc(m.subject||"(no subject)") + '</div>'
+      + esc((m.body_text || m.snippet || "").trim().slice(0, 4000))
+      + (m.has_attachments?'<div style="font-size:11px;margin-top:4px">📎 ' + (m.attachments||[]).map(a=>esc(a.filename)).join(", ") + '</div>':"")
+      + '<span class="meta">' + (m.direction==="out"?"sent":esc(m.from_email||"")) + ' · ' + et(m.occurred_at) + '</span></div>'
+    ).join("")}</div>
     <div id="draftbox"></div>
     <div class="comp" style="flex-direction:column;gap:6px">
       <textarea id="ebody" placeholder="Write your reply… (sends from ${esc((window.__mail&&window.__mail.address)||"the connected mailbox")} and threads onto this email)"></textarea>
@@ -1531,16 +1535,32 @@ async function loadLead(id) {
     <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
   const m = document.getElementById("msgs"); if (m) m.scrollTop = m.scrollHeight;
 }
+/* ⚠ .bub is white-space:pre-wrap, so EVERY newline and indent in this template renders as literal
+   blank lines inside the bubble. This function used to be written across several indented lines
+   and each message carried 2 blank lines above the text and 6 below -- which is how Josh's group
+   intro to Kendra showed up as a tall empty blue box with the words scrolled out of sight.
+   Keep the pieces joined, not laid out. If you reformat this, check a bubble afterwards. */
 function renderTimelineItem(t) {
   const side = t.direction === "out" ? "out" : "";
   const icon = t.kind === "call" ? "📞" : t.kind === "email" ? "✉️" : "";
-  return `<div class="bub ${side}" style="max-width:88%">
-    ${t.kind!=="text"?`<div style="font-weight:700;font-size:12px;margin-bottom:3px">${icon} ${t.kind==="email"?esc(t.subject||"(no subject)"):"Call"}</div>`:""}
-    ${esc((t.body||"").slice(0,1500))}
-    ${t.call_summary?`<div style="margin-top:5px;font-size:12px;background:rgba(255,255,255,.55);border-radius:8px;padding:6px"><b>Summary:</b> ${esc(t.call_summary)}</div>`:""}
-    ${t.action_items&&t.action_items.length?`<div style="margin-top:4px;font-size:12px"><b>Action items:</b> ${esc([].concat(t.action_items).join("; "))}</div>`:""}
-    ${t.transcript?`<div style="margin-top:4px"><a href="#" style="font-size:11.5px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display==='none'?'block':'none';return false">show transcript</a><div style="display:none;font-size:11.5px;white-space:pre-wrap;margin-top:4px">${esc(t.transcript)}</div></div>`:""}
-    <span class="meta">${et(t.at)}${t.type?" · "+esc(t.type):""}${t.send_status&&t.send_status!=="sent"?" · "+esc(t.send_status):""}</span></div>`;
+  const parts = [];
+  // Who else is reading this. On a group thread the client sees whatever you type about them, so
+  // this belongs at the TOP of the bubble, before the message, not tucked in the timestamp line.
+  if (t.group_with && t.group_with.length) {
+    parts.push('<div style="font-size:11.5px;font-weight:700;opacity:.85;margin-bottom:3px">'
+      + "👥 Group — with " + esc(t.group_with.join(", ")) + "</div>");
+  }
+  if (t.kind !== "text") {
+    parts.push('<div style="font-weight:700;font-size:12px;margin-bottom:3px">' + icon + " "
+      + (t.kind === "email" ? esc(t.subject || "(no subject)") : "Call") + "</div>");
+  }
+  parts.push(esc((t.body || "").trim().slice(0, 1500)));
+  if (t.call_summary) parts.push('<div style="margin-top:5px;font-size:12px;background:rgba(255,255,255,.55);border-radius:8px;padding:6px"><b>Summary:</b> ' + esc(t.call_summary) + "</div>");
+  if (t.action_items && t.action_items.length) parts.push('<div style="margin-top:4px;font-size:12px"><b>Action items:</b> ' + esc([].concat(t.action_items).join("; ")) + "</div>");
+  if (t.transcript) parts.push('<div style="margin-top:4px"><a href="#" style="font-size:11.5px" onclick="this.nextElementSibling.style.display=this.nextElementSibling.style.display===\'none\'?\'block\':\'none\';return false">show transcript</a><div style="display:none;font-size:11.5px;white-space:pre-wrap;margin-top:4px">' + esc(t.transcript) + "</div></div>");
+  parts.push('<span class="meta">' + et(t.at) + (t.type ? " · " + esc(t.type) : "")
+    + (t.send_status && t.send_status !== "sent" ? " · " + esc(t.send_status) : "") + "</span>");
+  return '<div class="bub ' + side + '" style="max-width:88%">' + parts.join("") + "</div>";
 }
 /* ---------- WHAT THIS CLIENT HAS SEEN (Josh 2026-08-20) ----------
    "add properties that are seen and the date and time of the showings and log the results and even
