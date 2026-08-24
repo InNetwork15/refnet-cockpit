@@ -2932,7 +2932,40 @@ window.changePw = async () => {
    Agents could only arrive through recruiting, so anyone Tony already knew had to be typed
    straight into the database. Name and mobile are the only required fields: everything this
    system sends an agent is a text, so a record without a number cannot be given work. */
+/* One selectable role. "On our team" is exclusive because in-house is a different relationship,
+   not an extra hat: an agent we employ is not also an outside partner we owe a fee to. Showing and
+   referral DO combine -- Brandi is both -- so those two are independent. */
+window.__agRoles = new Set();
+function roleCard(key, title, colour, blurb) {
+  const on = window.__agRoles.has(key);
+  return '<div onclick="toggleAgRole(\'' + key + '\')" data-role="' + key + '" style="cursor:pointer;'
+    + 'border:1.5px solid ' + (on ? colour : "var(--line)") + ';border-left:4px solid ' + colour + ';'
+    + 'border-radius:9px;padding:8px 11px;background:' + (on ? "#f7fbff" : "#fff") + '">'
+    + '<div style="display:flex;align-items:center;gap:7px">'
+    + '<span style="font-size:13px;color:' + (on ? colour : "#c3cad6") + '">' + (on ? "●" : "○") + '</span>'
+    + '<span style="font-weight:' + (on ? 700 : 600) + ';font-size:13.5px">' + title + '</span></div>'
+    + '<div class="meta" style="margin:2px 0 0 20px">' + blurb + '</div></div>';
+}
+window.toggleAgRole = function (key) {
+  const R = window.__agRoles;
+  if (R.has(key)) R.delete(key);
+  else {
+    if (key === "team") { R.clear(); }        // in-house stands alone
+    else R.delete("team");
+    R.add(key);
+  }
+  const box = document.getElementById("ag-roles");
+  if (box) box.innerHTML =
+      roleCard("team", "On our team", "var(--green)", "In-house. We own the showing — no agreement, no fee.")
+    + roleCard("showing", "Showing agent", "#0fb5a6", "Opens the door for a fee. Needs a signed agreement.")
+    + roleCard("referral", "Referral partner", "var(--purple)", "Takes the whole client. We get a share of their commission.");
+  const sw = document.getElementById("ag-signedwrap");
+  if (sw) sw.style.display = R.has("showing") ? "block" : "none";
+  const rf = document.getElementById("ag-reffees");
+  if (rf) rf.style.display = R.has("referral") ? "flex" : "none";
+};
 window.openAddAgent = function () {
+  window.__agRoles = new Set();
   const old = document.getElementById("addagent"); if (old) { old.remove(); return; }
   const ov = document.createElement("div"); ov.id = "addagent";
   ov.style.cssText = "position:fixed;inset:0;background:rgba(21,41,74,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px";
@@ -2947,17 +2980,24 @@ window.openAddAgent = function () {
     + fld("brokerage_name", "Brokerage", "Keller Williams Northern Michigan")
     + fld("email", "Email", "jane@brokerage.com", "email")
     + fld("home_address", "Home or office address", "Street, City, ZIP — used for distance ranking")
-    + '<div style="display:flex;gap:16px;flex-wrap:wrap;margin:4px 0 10px">'
-      + '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="ag-is_team"> On our team (in-house)</label>'
-      + '<label style="display:flex;align-items:center;gap:6px;font-size:13px"><input type="checkbox" id="ag-is_referral_partner"> We refer clients to them</label>'
+    // The three roles the rest of the system actually recognises. Showing was missing entirely,
+    // which made the form unable to describe most of the people on the Agents page.
+    // Cards rather than checkboxes: two bare boxes with wrapping labels read as an afterthought,
+    // and these carry the same colours the assign box uses, so a role means one thing everywhere.
+    + '<div style="font-size:12px;font-weight:600;color:var(--muted);margin:2px 0 5px">What can they do? Pick any that apply.</div>'
+    + '<div id="ag-roles" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">'
+      + roleCard("team", "On our team", "var(--green)", "In-house. We own the showing — no agreement, no fee.")
+      + roleCard("showing", "Showing agent", "#0fb5a6", "Opens the door for a fee. Needs a signed agreement.")
+      + roleCard("referral", "Referral partner", "var(--purple)", "Takes the whole client. We get a share of their commission.")
     + '</div>'
+    + '<div id="ag-signedwrap" style="display:none;background:#fff8e6;border:1px solid #f0dfae;border-radius:9px;padding:9px 11px;margin-bottom:10px">'
+      + '<label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.45;cursor:pointer">'
+      + '<input type="checkbox" id="ag-signed" style="margin-top:2px;flex:none">'
+      + '<span>They have <b>already signed</b> a showing agreement. Tick this only if you hold it — otherwise they get one by text and sign with I AGREE, and cannot be handed a client until they do.</span></label></div>'
     + '<div id="ag-reffees" style="display:none;gap:10px">'
       + '<div style="flex:1">' + fld("referral_fee_pct", "Referral % we get (buyer)", "25") + '</div>'
       + '<div style="flex:1">' + fld("referral_listing_pct", "Referral % we get (listing)", "40") + '</div>'
     + '</div>'
-    // A signed agreement is deliberately NOT settable here. It is the showing lane's gate and has
-    // to be earned by a real I AGREE, or the gate stops meaning anything.
-    + '<div class="meta" style="margin-bottom:10px">A showing agreement still has to be signed by text before this agent can be handed a client to show.</div>'
     + '<div id="ag-msg" class="meta" style="min-height:16px;margin-bottom:8px"></div>'
     + '<div style="display:flex;gap:8px;justify-content:flex-end">'
       + '<button class="btn ghost" id="ag-cancel">Cancel</button><button class="btn" id="ag-save">Add agent</button></div></div>';
@@ -2965,10 +3005,7 @@ window.openAddAgent = function () {
   ov.onclick = (e) => { if (e.target === ov && !(ov.querySelector("#ag-full_name") || {}).value) ov.remove(); };
   ov.querySelector("#ag-cancel").onclick = () => ov.remove();
   ov.querySelector("#ag-full_name").focus();
-  const refBox = ov.querySelector("#ag-reffees");
-  ov.querySelector("#ag-is_referral_partner").onchange = function () {
-    refBox.style.display = this.checked ? "flex" : "none";
-  };
+
   ov.querySelector("#ag-save").onclick = async function () {
     const val = (k) => (ov.querySelector("#ag-" + k) || {}).value || "";
     const msg = ov.querySelector("#ag-msg");
@@ -2979,8 +3016,11 @@ window.openAddAgent = function () {
       action: "create_agent",
       full_name: val("full_name"), cell_phone: val("cell_phone"),
       brokerage_name: val("brokerage_name"), email: val("email"), home_address: val("home_address"),
-      is_team: ov.querySelector("#ag-is_team").checked,
-      is_referral_partner: ov.querySelector("#ag-is_referral_partner").checked,
+      is_team: window.__agRoles.has("team"),
+      is_referral_partner: window.__agRoles.has("referral"),
+      // Only ever true when Josh ticked the amber box saying he already holds the paper. The
+      // system will not invent a signature.
+      has_signed_agreement: window.__agRoles.has("showing") && !!(ov.querySelector("#ag-signed") || {}).checked,
       referral_fee_pct: val("referral_fee_pct"), referral_listing_pct: val("referral_listing_pct"),
     }) });
     if (r.error) { msg.textContent = r.error; this.disabled = false; this.textContent = "Add agent"; return; }
