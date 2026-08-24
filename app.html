@@ -1505,7 +1505,7 @@ async function loadLead(id) {
       <span class="whoName">${esc(name)}</span>
       <span class="kind ${L.lane==="vl"?"":"lane-client"}" style="${L.lane==="vl"?"background:#efe7d9;color:#7a5a12":""}">${esc(LANE_LABEL[L.lane]||L.lane||"client")}</span>
       <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span></div>
-    <div style="padding:12px 16px;border-bottom:1px solid #eef0f4">
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f4;flex:0 1 auto;min-height:0;overflow-y:auto">
       <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
         ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
         ${L.wants?`<span class="kind">wants to ${esc(L.wants)}</span>`:""}</div>
@@ -1924,7 +1924,7 @@ function roleChooser(a) {
                                   : " <b>Referral fee not set on their profile.</b>") : "";
   if (roles.length < 2) return `<div class="meta" style="margin-top:3px">${blurb}${fee}</div>`;
   return `<div style="margin-top:6px">
-    <div class="meta" style="margin-bottom:4px"><b>${esc(a.name.split(" ")[0])} can do both — which is this?</b></div>
+    <div class="meta" style="margin-bottom:4px"><b>${esc(a.name)} can do both — which is this?</b></div>
     <div style="display:flex;gap:6px;flex-wrap:wrap">${roles.map(r => {
       const [lab, col] = AKIND[r] || [r, "var(--line)"];
       const on = r === cur;
@@ -1975,9 +1975,9 @@ function drawAssignBox() {
         <option value="__manual__">— type a different address —</option></select>
       <input id="amanual" placeholder="Street, City" style="display:${addrs.length ? "none" : "block"};margin-bottom:6px">
       ${activeRole(sel) === "referral"
-        ? feeBox(sel) + `<input id="anote" placeholder="Anything ${esc(sel.name.split(" ")[0])} should know? (optional)" style="margin-bottom:8px">`
+        ? feeBox(sel) + `<input id="anote" placeholder="Anything ${esc(sel.name)} should know? (optional)" style="margin-bottom:8px">`
         : `<input id="atime" placeholder="When? e.g. Fri, Aug 22nd 12:30pm (optional)" style="margin-bottom:8px">`}
-      <button onclick="submitAssign()">${activeRole(sel) === "referral" ? "🤝 Hand the client to " + esc(sel.name.split(" ")[0]) : "👤 Assign to " + esc(sel.name.split(" ")[0])}</button>
+      <button onclick="submitAssign()">${activeRole(sel) === "referral" ? "🤝 Refer to " + esc(sel.name) : "👤 Assign to " + esc(sel.name)}</button>
       <button class="btn ghost" style="margin-left:6px" onclick="document.getElementById('assignbox').style.display='none'">Cancel</button>`
       : `<div class="meta" style="margin-top:6px">Pick somebody above.</div>`}
     <div style="margin-top:9px;border-top:1px solid var(--line);padding-top:8px">
@@ -2012,7 +2012,7 @@ window.submitAssign = async () => {
   const warn = role === "referral"
     // The confirmation states the two numbers back, because they are the whole commercial content
     // of the document and this is the last moment before it is legally offered to somebody.
-    ? `Send ${a.name} the referral agreement for ${first}?\n\nWe get back:\n  • ${fee.buyer}% on a purchase\n  • ${fee.listing}% on a listing\n(of their gross brokerage commission)\n\n${first}'s name and number are NOT shared yet — that happens only after ${a.name.split(" ")[0]} replies I AGREE, which signs it.`
+    ? `Send ${a.name} the referral agreement for ${first}?\n\nWe get back:\n  • ${fee.buyer}% on a purchase\n  • ${fee.listing}% on a listing\n(of their gross brokerage commission)\n\n${first}'s name and number are NOT shared yet — that happens only after ${a.name} replies I AGREE, which signs it.`
     : role === "partner"
       ? `Assign ${first} to ${a.name}?\n\nThey are an outside showing partner, so a showing fee will accrue on this placement. They get an automatic text.`
       : `Assign ${first} to ${a.name}?\n\nThey are on our team — no fee accrues. They get an automatic text.`;
