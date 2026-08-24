@@ -1967,7 +1967,7 @@ window.submitAssign = async () => {
   // otherwise the confirmation quietly describes a different deal from the one about to happen.
   const role = activeRole(a);
   const warn = role === "referral"
-    ? `Hand ${first} to ${a.name}?\n\nThey own the relationship from here. No showing fee accrues to us; a referral fee is owed on their side. Any recruiting we had open closes.`
+    ? `Send ${a.name} the referral agreement for ${first}?\n\nThey get the Michigan agent-to-agent referral agreement by text. ${first}'s name and number are NOT shared yet — that happens only after ${a.name.split(" ")[0]} replies I AGREE, which signs it.\n\nFee on signing: ${a.referral_fee_pct != null ? a.referral_fee_pct + "% of gross brokerage commission" : "NOT SET on their profile — the agreement will print a blank"}.`
     : role === "partner"
       ? `Assign ${first} to ${a.name}?\n\nThey are an outside showing partner, so a showing fee will accrue on this placement. They get an automatic text.`
       : `Assign ${first} to ${a.name}?\n\nThey are on our team — no fee accrues. They get an automatic text.`;
@@ -1982,7 +1982,11 @@ window.submitAssign = async () => {
   if (r.error) { alert("Not assigned: " + r.error); return; }
   document.getElementById("assignbox").style.display = "none";
   alert(r.kind === "referral"
-    ? `${r.agent} now owns this client. A message to ${first} is drafted below for you to read and send — nothing was sent automatically.`
+    // The server reports what actually happened, including a send that was blocked or skipped,
+    // because "agreement sent" when nothing left the building is the worst thing this box could say.
+    ? (r.message || `Referral agreement sent to ${r.agent}.`)
+      + (r.ref_code ? `\n\nReferral ID: ${r.ref_code}` : "")
+      + (r.send_status && r.send_status !== "sent" ? `\n\n⚠ Text status: ${r.send_status} — they may not have received it.` : "")
     : `${r.agent} is covering it and has been texted. It has moved to the Assigned page.`
       + (r.agent_notified && r.agent_notified !== "sent" ? `\n\nText status: ${r.agent_notified}` : ""));
   afterLeadAction(window.__lead.lead.id);
