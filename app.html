@@ -1856,7 +1856,7 @@ window.openAssignBox = async () => {
   const L = (window.__lead && window.__lead.lead) || {};
   const d = await lapi("", { method: "POST", body: JSON.stringify({ action: "assignable_agents", lead_id: L.id }) });
   if (d.error) { box.innerHTML = '<div class="meta">' + esc(d.error) + '</div>'; return; }
-  window.__assign = d; ASEL = null; window.__assignRole = null;
+  window.__assign = d; ASEL = null; window.__assignRole = null; window.__fee = { buyer: null, listing: null };
   drawAssignBox();
 };
 const AKIND = {
@@ -1877,6 +1877,45 @@ function activeRole(a) {
   return roles.includes(window.__assignRole) ? window.__assignRole : roles[0];
 }
 window.pickRole = (r) => { window.__assignRole = r; drawAssignBox(); };
+/* Josh 2026-08-22: "when we select a referring agent we need a pop up to ask us the referring
+   amount we get back so 25% or 40% on the buyers and Listing we want defaulted to 40%."
+   THE NUMBER WE GET BACK, asked every single time, because it is negotiated per referral and the
+   figure printed on the agreement is the one we can actually collect on. It is deliberately not
+   silently inherited from the agent's profile: a stale default that nobody looked at is how the
+   wrong percentage ends up on a signed document. */
+const FEE_BUYER_CHOICES = [25, 40];
+const FEE_LISTING_DEFAULT = 40;
+window.__fee = { buyer: null, listing: null };
+window.setFeeBuyer = (v) => { window.__fee.buyer = v; drawAssignBox(); };
+function feeNow(a) {
+  const buyer = window.__fee.buyer != null ? window.__fee.buyer
+    : (a && a.referral_fee_pct != null ? Number(a.referral_fee_pct) : FEE_LISTING_DEFAULT);
+  const listing = window.__fee.listing != null ? window.__fee.listing : FEE_LISTING_DEFAULT;
+  return { buyer, listing };
+}
+function feeBox(a) {
+  const f = feeNow(a);
+  const chip = (v) => `<span onclick="setFeeBuyer(${v})" style="cursor:pointer;font-size:12px;font-weight:700;
+    padding:5px 13px;border-radius:999px;border:1.5px solid ${f.buyer === v ? "var(--purple)" : "var(--line)"};
+    background:${f.buyer === v ? "var(--purple)" : "#fff"};color:${f.buyer === v ? "#fff" : "#5f6e8a"}">${v}%</span>`;
+  return `<div style="border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-bottom:8px;background:#fbfcfe">
+    <div style="font-size:12.5px;font-weight:700;color:var(--brand);margin-bottom:2px">What do we get back?</div>
+    <div class="meta" style="margin-bottom:7px">Percent of their gross brokerage commission. This is what prints on the agreement.</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:7px">
+      <span class="meta" style="min-width:58px">Buyer</span>${FEE_BUYER_CHOICES.map(chip).join("")}
+      <input id="afeebuyer" type="number" min="0" max="100" step="0.5" value="${f.buyer}"
+        oninput="window.__fee.buyer=this.value===''?null:Number(this.value)"
+        style="width:78px;padding:5px 8px;font-size:12.5px;margin:0">
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="meta" style="min-width:58px">Listing</span>
+      <input id="afeelisting" type="number" min="0" max="100" step="0.5" value="${f.listing}"
+        oninput="window.__fee.listing=this.value===''?null:Number(this.value)"
+        style="width:78px;padding:5px 8px;font-size:12.5px;margin:0">
+      <span class="meta">defaults to ${FEE_LISTING_DEFAULT}%</span>
+    </div>
+  </div>`;
+}
 function roleChooser(a) {
   const roles = agentRoles(a), cur = activeRole(a);
   const [, colour, blurb] = AKIND[cur] || ["", "var(--line)", ""];
@@ -1936,7 +1975,7 @@ function drawAssignBox() {
         <option value="__manual__">— type a different address —</option></select>
       <input id="amanual" placeholder="Street, City" style="display:${addrs.length ? "none" : "block"};margin-bottom:6px">
       ${activeRole(sel) === "referral"
-        ? `<input id="anote" placeholder="Anything ${esc(sel.name.split(" ")[0])} should know? (optional)" style="margin-bottom:8px">`
+        ? feeBox(sel) + `<input id="anote" placeholder="Anything ${esc(sel.name.split(" ")[0])} should know? (optional)" style="margin-bottom:8px">`
         : `<input id="atime" placeholder="When? e.g. Fri, Aug 22nd 12:30pm (optional)" style="margin-bottom:8px">`}
       <button onclick="submitAssign()">${activeRole(sel) === "referral" ? "🤝 Hand the client to " + esc(sel.name.split(" ")[0]) : "👤 Assign to " + esc(sel.name.split(" ")[0])}</button>
       <button class="btn ghost" style="margin-left:6px" onclick="document.getElementById('assignbox').style.display='none'">Cancel</button>`
@@ -1954,7 +1993,7 @@ function drawAssignBox() {
 }
 // Changing agent clears the chosen role: carrying "referral" over to the next person would preload
 // the most consequential option for somebody you have not considered in that light yet.
-window.pickAgent = (id) => { ASEL = (ASEL === id ? null : id); window.__assignRole = null; drawAssignBox(); };
+window.pickAgent = (id) => { ASEL = (ASEL === id ? null : id); window.__assignRole = null; window.__fee = { buyer: null, listing: null }; drawAssignBox(); };
 window.submitAssign = async () => {
   const d = window.__assign, a = d && d.agents.find(x => x.id === ASEL);
   if (!a) { alert("Pick an agent first."); return; }
@@ -1966,14 +2005,21 @@ window.submitAssign = async () => {
   // warning has to describe the role that was PICKED, not the one they happen to rank first --
   // otherwise the confirmation quietly describes a different deal from the one about to happen.
   const role = activeRole(a);
+  const fee = feeNow(a);
+  if (role === "referral" && !(fee.buyer >= 0 && fee.buyer <= 100 && fee.listing >= 0 && fee.listing <= 100)) {
+    alert("Set the buyer and listing percentages first — they print on the agreement."); return;
+  }
   const warn = role === "referral"
-    ? `Send ${a.name} the referral agreement for ${first}?\n\nThey get the Michigan agent-to-agent referral agreement by text. ${first}'s name and number are NOT shared yet — that happens only after ${a.name.split(" ")[0]} replies I AGREE, which signs it.\n\nFee on signing: ${a.referral_fee_pct != null ? a.referral_fee_pct + "% of gross brokerage commission" : "NOT SET on their profile — the agreement will print a blank"}.`
+    // The confirmation states the two numbers back, because they are the whole commercial content
+    // of the document and this is the last moment before it is legally offered to somebody.
+    ? `Send ${a.name} the referral agreement for ${first}?\n\nWe get back:\n  • ${fee.buyer}% on a purchase\n  • ${fee.listing}% on a listing\n(of their gross brokerage commission)\n\n${first}'s name and number are NOT shared yet — that happens only after ${a.name.split(" ")[0]} replies I AGREE, which signs it.`
     : role === "partner"
       ? `Assign ${first} to ${a.name}?\n\nThey are an outside showing partner, so a showing fee will accrue on this placement. They get an automatic text.`
       : `Assign ${first} to ${a.name}?\n\nThey are on our team — no fee accrues. They get an automatic text.`;
   if (!confirm(warn)) return;
   const r = await lapi("", { method: "POST", body: JSON.stringify({
     action: "assign_lead", lead_id: window.__lead.lead.id, agent_id: a.id, as_kind: role,
+    ...(role === "referral" ? { buyer_fee_pct: fee.buyer, listing_fee_pct: fee.listing } : {}),
     property_address: address || null,
     showing_time: (document.getElementById("atime") || {}).value || null,
     note: (document.getElementById("anote") || {}).value || null,
