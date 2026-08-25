@@ -2439,8 +2439,11 @@ async function viewShowings() {
     + `<div class="ztile"><span>Booked</span><b>${c.booked||0}</b><em>on the calendar</em></div>`
     + `<div class="ztile"><span>Happened</span><b>${c.happened||0}</b><em>awaiting confirmation</em></div>`
     + `<div class="ztile"><span>Verified</span><b style="color:var(--green)">${c.verified||0}</b><em>confirmed by a person</em></div>`;
+  // held for the tour editor, so the stop list does not have to be squeezed through an onclick attribute
+  window.__showRows = rows;
   document.getElementById("slist").innerHTML = rows.length ? rows.map(r => {
     const [lbl, cls] = LBL[r.stage] || ["", "st-waiting"];
+    const stops = r.stops || [];
     return `<div class="row" style="border-left:3px solid ${r.stage==="needs_agent"?"var(--red)":r.stage==="verified"?"var(--green)":"var(--line)"};padding-left:10px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <a href="#/clients" onclick="jumpToLead('${r.lead_id}')" class="whoName" style="color:var(--blue);cursor:pointer">${esc(r.client)}</a>
@@ -2448,61 +2451,158 @@ async function viewShowings() {
         ${r.agent ? `<span class="kind ${r.agent_is_team?"lane-agent":""}">${esc(r.agent)}${r.agent_is_team?" (in-house)":""}</span>` : ""}
         ${r.has_offer ? `<span class="st st-answered">💰 offer in</span>` : ""}
         <span style="flex:1"></span>
+        ${stops.length > 1 ? `<span class="kind">${stops.length} stops</span>` : ""}
         ${!r.outcome ? (r.showing_id
-          ? `<button style="padding:4px 11px;font-size:11.5px" onclick="editShowing('${r.showing_id}','${esc(String(r.address||"").replace(/'/g,""))}','${r.scheduled_at||""}',${r.duration_minutes||45})">✏️ Edit showing</button>`
+          ? `<button style="padding:4px 11px;font-size:11.5px" onclick="editTour('${r.id}')">✏️ Edit showing</button>`
           : `<button style="padding:4px 11px;font-size:11.5px" onclick="scheduleShowing('${r.lead_id}')">✏️ Edit showing</button>`) : ""}
         ${!r.outcome ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="cancelShowing('${r.showing_id||""}','${r.id}','${esc(String(r.client||"").replace(/'/g,""))}')">❌ Cancel</button>` : ""}
         <button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="nurtureLead('${r.lead_id}')">🌱 Nurture</button>
         ${!r.has_offer ? `<button class="btn ghost" style="padding:4px 11px;font-size:11.5px;margin-left:6px" onclick="newOffer('${r.lead_id}','${esc(String(r.address||"").replace(/'/g,""))}')">💰 Make an offer</button>` : ""}
       </div>
       <div class="meta"><a href="#/clients" onclick="jumpToLead('${r.lead_id}')" style="color:var(--blue);cursor:pointer">${esc(r.address||"(no address)")}</a>${r.when?" · "+esc(r.when):""}${r.phone?" · "+esc(fmtPh(r.phone)):""}</div>
+      ${stops.length > 1 ? `<div class="meta">Tour: ${stops.map(s => `${et(s.at)} — ${esc(s.address || "")}${s.logged ? " ✓" : ""}`).join(" · ")}</div>` : ""}
       ${r.feedback?`<div class="meta">Feedback: <i>${esc(r.feedback)}</i></div>`:""}</div>`;
   }).join("") : `<div class="empty">No showings booked yet.</div>`;
 }
 
-/* EDIT A BOOKED SHOWING (Josh 2026-08-20: "Edit Showing").
-   Offered when the scheduler shipped and never built, so until now moving a tour meant cancelling
-   and rebooking -- which loses the row and texts the agent as though it were a brand new showing.
-   The agent is told it MOVED, which is a different sentence from "you have a showing" and matters
-   to somebody who may already be driving. */
-window.editShowing = async (showingId, address, at, mins) => {
-  const d = at ? new Date(at) : new Date();
-  const pad = (n) => String(n).padStart(2, "0");
-  // the stored time is UTC; the person editing it thinks in Eastern, which is what they booked in
-  const et = new Date(d.toLocaleString("en-US", { timeZone: "America/Detroit" }));
+/* EDIT A BOOKED TOUR (Josh 2026-08-20: "Edit Showing" · 2026-08-25: "I want to be able to add
+   properties to the showing tour here.")
+   Moving a showing used to mean cancelling and rebooking, which loses the row and texts the agent
+   as though it were a brand new appointment. Now the same box holds the whole afternoon: a buyer
+   driving up from downstate sees four houses, and booking those one at a time sent four separate
+   "you have a showing" texts that read like four unrelated jobs.
+   Each stop stays its own showing record -- that is what carries the client's feedback on THAT
+   house, its outcome and its map pin -- but they are saved in one go and the agent gets ONE
+   itinerary. A stop that has already been logged is shown but locked: it happened, and the fee
+   may already hang off it. */
+const ET_ZONE = "America/Detroit";
+// Turn an Eastern wall-clock date + time into a real instant. The old code appended a hardcoded
+// "-04:00", which is a lie from the first Sunday in November until March and would book every
+// winter showing an hour out.
+function etWallToIso(dateStr, timeStr) {
+  const wall = Date.parse(`${dateStr}T${timeStr}:00Z`);
+  const offsetAt = (ms) => {
+    const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: ET_ZONE, hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" })
+      .formatToParts(new Date(ms)).filter(x => x.type !== "literal").map(x => [x.type, x.value]));
+    return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour % 24, +p.minute, +p.second) - ms;
+  };
+  let guess = wall - offsetAt(wall);
+  guess = wall - offsetAt(guess);        // second pass settles the two days a year DST moves
+  return new Date(guess).toISOString();
+}
+// the stored time is UTC; the person editing it thinks in Eastern, which is what they booked in
+function etParts(iso) {
+  const d = iso ? new Date(iso) : new Date();
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: ET_ZONE, hour12: false,
+    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })
+    .formatToParts(d).filter(x => x.type !== "literal").map(x => [x.type, x.value]));
+  return { date: `${p.year}-${p.month}-${p.day}`, time: `${String(+p.hour % 24).padStart(2, "0")}:${p.minute}` };
+}
+window.__tour = null;
+window.editTour = async (requestId) => {
+  const row = (window.__showRows || []).find(x => x.id === requestId);
+  if (!row || !row.showing_id) { alert("That showing is not booked yet."); return; }
+  // one stop or many, the editor works the same way -- an older single showing simply starts with one
+  const stops = (row.stops && row.stops.length ? row.stops : [{
+    id: row.showing_id, address: row.address, at: row.scheduled_at, minutes: row.duration_minutes || 45, logged: false,
+  }]).map(s => ({ ...etParts(s.at), id: s.id, address: s.address || "", mins: s.minutes || 45, logged: !!s.logged, remove: false }));
+  window.__tour = { anchorId: row.showing_id, client: row.client, agent: row.agent, stops };
   const ov = popup(`<h2>✏️ Edit showing</h2><div class="body">
-    <div class="meta" style="margin-bottom:3px">Property</div>
-    <input id="es-addr" value="${esc(address || "")}" style="width:100%;margin-bottom:8px">
-    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-      <div><div class="meta" style="margin-bottom:3px">Date</div>
-        <input type="date" id="es-date" value="${et.getFullYear()}-${pad(et.getMonth()+1)}-${pad(et.getDate())}" style="width:170px"></div>
-      <div><div class="meta" style="margin-bottom:3px">Start</div>
-        <input type="time" id="es-time" value="${pad(et.getHours())}:${pad(et.getMinutes())}" style="width:130px"></div>
-      <div><div class="meta" style="margin-bottom:3px">Minutes</div>
-        <input id="es-mins" value="${mins || 45}" style="width:80px"></div>
-    </div>
-    <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+    <div class="meta" style="margin-bottom:8px">${esc(row.client)}${row.agent ? " · " + esc(row.agent) : ""} — every stop on this tour. ${esc(row.agent || "The agent")} gets one text with the whole run.</div>
+    <div id="tour-stops"></div>
+    <button class="btn ghost" style="padding:5px 12px;font-size:12px;margin-top:2px" onclick="addTourStop()">＋ Add another property</button>
+    <div style="margin-top:14px;display:flex;align-items:center;gap:8px">
       <button id="es-go">Save the change</button>
       <button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Cancel</button>
       <span class="meta" id="es-msg" style="margin-left:auto"></span>
     </div></div>`);
+  drawTourStops();
   document.getElementById("es-go").onclick = async () => {
-    const date = document.getElementById("es-date").value, time = document.getElementById("es-time").value;
-    const msg = document.getElementById("es-msg");
-    if (!date || !time) { msg.textContent = "Date and start time are both needed."; return; }
+    readTourStops();
+    const msg = document.getElementById("es-msg"), t = window.__tour;
+    const live = t.stops.filter(s => !s.remove);
+    if (live.some(s => !s.address.trim())) { msg.textContent = "Every stop needs an address."; return; }
+    if (live.some(s => !s.date || !s.time)) { msg.textContent = "Every stop needs a date and a start time."; return; }
     document.getElementById("es-go").disabled = true;
     const r = await lapi("", { method: "POST", body: JSON.stringify({
-      action: "reschedule_showing", showing_id: showingId,
-      property_address: document.getElementById("es-addr").value.trim(),
-      scheduled_at: `${date}T${time}:00-04:00`,
-      duration_minutes: Number(document.getElementById("es-mins").value) || 45 }) });
+      action: "save_tour", showing_id: t.anchorId,
+      by: (ME && ME.full_name) || "app",
+      stops: t.stops.map(s => ({
+        id: s.id || null, remove: s.remove || false,
+        property_address: s.address.trim(),
+        scheduled_at: etWallToIso(s.date, s.time),
+        duration_minutes: Number(s.mins) || 45,
+      })) }) });
     if (r.error) { msg.textContent = r.error; document.getElementById("es-go").disabled = false; return; }
     ov.remove();
-    alert(`Moved to ${r.when}.` + (r.agent_notified === "sent" ? `\n\n${r.agent} has been texted that it changed.`
-      : r.agent_notified === "no_phone" ? `\n\n⚠ ${r.agent} has no phone on file, so they were NOT told.` : ""));
+    const what = r.stops > 1 ? `${r.stops}-stop tour starting ${r.when}` : `Moved to ${r.when}`;
+    alert(`${what}.`
+      + (r.added ? `\n${r.added} property added.` : "") + (r.dropped ? `\n${r.dropped} dropped.` : "")
+      + (r.agent_notified === "sent" ? `\n\n${r.agent} has been texted the whole itinerary.`
+        : r.agent_notified === "no_phone" ? `\n\n⚠ ${r.agent} has no phone on file, so they were NOT told.`
+        : `\n\n⚠ Text status: ${r.agent_notified} — ${r.agent || "the agent"} may not have been told.`));
     viewShowings();
   };
 };
+// what the boxes say right now, before a redraw throws the DOM away
+function readTourStops() {
+  const t = window.__tour; if (!t) return;
+  t.stops.forEach((s, i) => {
+    const g = (f) => document.getElementById(`ts-${f}-${i}`);
+    if (g("addr")) s.address = g("addr").value;
+    if (g("date")) s.date = g("date").value;
+    if (g("time")) s.time = g("time").value;
+    if (g("mins")) s.mins = g("mins").value;
+  });
+}
+function drawTourStops() {
+  const t = window.__tour;
+  document.getElementById("tour-stops").innerHTML = t.stops.map((s, i) => {
+    if (s.remove) return `<div class="meta" style="padding:6px 0;opacity:.6">✕ ${esc(s.address)} — dropping this stop
+      <a href="#" onclick="undropTourStop(${i});return false" style="color:var(--blue);margin-left:6px">undo</a></div>`;
+    const locked = s.logged ? " disabled" : "";
+    return `<div style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:${s.logged ? "#f6f7f9" : "#fff"}">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+        <span class="meta"><b>Stop ${i + 1}</b>${s.id === t.anchorId ? " · anchors this tour" : ""}${s.logged ? " · already logged, locked" : ""}</span>
+        <span style="flex:1"></span>
+        ${s.id !== t.anchorId && !s.logged ? `<a href="#" onclick="dropTourStop(${i});return false" style="color:var(--red);font-size:12px">✕ remove</a>` : ""}
+      </div>
+      <input id="ts-addr-${i}" value="${esc(s.address)}" placeholder="Property address" style="width:100%;margin-bottom:8px"${locked}>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <div><div class="meta" style="margin-bottom:3px">Date</div>
+          <input type="date" id="ts-date-${i}" value="${s.date}" style="width:170px"${locked}></div>
+        <div><div class="meta" style="margin-bottom:3px">Start</div>
+          <input type="time" id="ts-time-${i}" value="${s.time}" style="width:130px"${locked}></div>
+        <div><div class="meta" style="margin-bottom:3px">Minutes</div>
+          <input id="ts-mins-${i}" value="${esc(String(s.mins))}" style="width:80px"${locked}></div>
+      </div></div>`;
+  }).join("");
+}
+// A new stop lands after the last one with a quarter hour to drive between, because that is what
+// the person adding it would have typed anyway -- and two stops at the same minute is a booking
+// the database refuses outright.
+window.addTourStop = () => {
+  readTourStops();
+  const t = window.__tour, live = t.stops.filter(s => !s.remove);
+  const last = live[live.length - 1];
+  let date = last ? last.date : etParts(null).date, time = last ? last.time : "17:00";
+  if (last) {
+    const next = new Date(Date.parse(`${last.date}T${last.time}:00Z`) + ((Number(last.mins) || 45) + 15) * 60000);
+    date = next.toISOString().slice(0, 10);
+    time = next.toISOString().slice(11, 16);
+  }
+  t.stops.push({ id: null, address: "", date, time, mins: 45, logged: false, remove: false });
+  drawTourStops();
+};
+window.dropTourStop = (i) => {
+  readTourStops();
+  const s = window.__tour.stops[i];
+  // never saved, so there is nothing to cancel and nothing to undo -- just take the box away
+  if (!s.id) window.__tour.stops.splice(i, 1); else s.remove = true;
+  drawTourStops();
+};
+window.undropTourStop = (i) => { readTourStops(); window.__tour.stops[i].remove = false; drawTourStops(); };
 /* CANCEL A SHOWING (Josh 2026-08-20: "Cancel Showing").
    Deliberately not the same as a no-show. A no-show is the CLIENT failing to turn up, which is
    feedback about the client; a cancellation is the tour being called off. Merging them would put a
