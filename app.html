@@ -2916,9 +2916,11 @@ window.cancelShowing = async (showingId, requestId, client) => {
    that un-parking them should be trivial. */
 async function viewNurture() {
   V().innerHTML = `<h1>Nurture</h1>
-    <div class="sub">Clients who are not ready yet, and the date we promised ourselves we would check back.</div>
+    <div class="sub">Clients who are not ready yet, and the bot whose whole job is getting them back out to see a home.</div>
+    <div id="nbot"></div>
     <div id="ntiles" class="ztiles"></div>
     <div class="card"><h2>🌱 Resting</h2><div class="body" id="nlist">Loading…</div></div>`;
+  drawNurtureBot();
   const d = await lapi("&section=clients&stage=nurturing");
   const rows = (d.rows || []).slice().sort((a, b) => {
     const ao = a.nurture?.overdue ? 0 : 1, bo = b.nurture?.overdue ? 0 : 1;
@@ -2927,6 +2929,9 @@ async function viewNurture() {
   });
   const due = rows.filter(r => r.nurture?.overdue).length;
   const undated = rows.filter(r => !r.nurture?.check_at).length;
+  // the switch says how many people it is about to text, which is the number that matters
+  window.__nurtureCount = rows.length;
+  drawNurtureBot();
   document.getElementById("ntiles").innerHTML =
       `<div class="ztile"><span>Resting</span><b>${rows.length}</b><em>not ready yet</em></div>`
     + `<div class="ztile"><span>Check back due</span><b style="color:${due ? "var(--amber)" : "var(--green)"}">${due}</b><em>the date has passed</em></div>`
@@ -2948,6 +2953,45 @@ async function viewNurture() {
     </div>`).join("")
     : `<div class="empty">Nobody is resting. Everyone we have is either being worked or has moved on.</div>`;
 }
+
+/* THE NURTURE BOT'S ON SWITCH (Josh 2026-08-26).
+   It lived only in a SQL one-liner, which is no use to the person whose decision it actually is.
+   The panel states what changes rather than asking "are you sure": this is the one agent that
+   texts a client and answers them back with nobody reading it first. */
+async function drawNurtureBot() {
+  const el = document.getElementById("nbot"); if (!el) return;
+  let h = {};
+  try { h = await api("?section=health"); } catch { /* the page still works without it */ }
+  const n = h.nurture || {};
+  const adm = ME && ME.role === "admin";
+  const line = n.from ? esc(n.from) : "Tony's own line";
+  el.innerHTML = `<div class="card" style="border-left:4px solid ${n.on ? "var(--green)" : "var(--line)"}">
+    <div class="body" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:260px">
+        <b style="font-size:14px">${n.on ? "🌱 The nurture bot is working" : "⏸ The nurture bot is off"}</b>
+        <div class="meta" style="margin-top:3px">${n.on
+          ? `Texting from ${line} on days ${esc(n.schedule || "")} after somebody is parked, up to ${n.max_per_run} an hour, and answering their replies itself. It stops the moment somebody says they are ready — or asks us to stop.`
+          : `Nobody resting below hears anything. Turned on, it texts from ${line} on days ${esc(n.schedule || "")} after they are parked and answers their replies itself.`}</div>
+        ${!n.has_own_line ? `<div class="meta" style="margin-top:3px;color:var(--amber)">⚠ No dedicated nurture line configured — it would send from Tony's client line.</div>` : ""}
+      </div>
+      ${adm ? (n.on
+        ? `<button class="btn ghost" onclick="setNurtureBot(false)">Turn it off</button>`
+        : `<button onclick="setNurtureBot(true)">🌱 Turn the nurture bot on</button>`) : ""}
+    </div></div>`;
+}
+window.setNurtureBot = async (on) => {
+  const resting = (window.__nurtureCount ?? 0);
+  if (on) {
+    if (!confirm(`Turn the nurture bot on?\n\nIt will start texting the ${resting} clients resting below — most were parked days ago, so they all come due at once. It sends 8 an hour, so the backlog goes out over the day rather than in one burst.\n\nFrom then on it also ANSWERS their replies by itself, with nobody approving the message first.\n\nIt stops on its own when somebody says they are ready (you get an alert to book them), and marks anyone who asks us to stop as do-not-contact.`)) return;
+    if (!confirm("Last check — these are real clients and nobody reads the messages before they send.\n\nTurn it on?")) return;
+  } else {
+    if (!confirm("Turn the nurture bot off?\n\nParked clients stop hearing from us entirely, and replies already in flight will not be answered.")) return;
+  }
+  const r = await api("", { method: "POST", body: JSON.stringify({ action: "set_nurture_engine", on, by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not changed: " + r.error); return; }
+  alert(on ? "The nurture bot is on. First texts go out within the hour." : "The nurture bot is off.");
+  viewNurture();
+};
 
 /* ---------- UNDER CONTRACT (Josh 2026-08-20) ----------
    The end of OUR pipeline and the start of the INRE platform's. That handover is the only thing
