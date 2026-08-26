@@ -1582,6 +1582,7 @@ async function loadLead(id) {
       ${d.last_touch ? `<span class="meta" style="margin-left:auto">Last touch: ${esc(d.last_touch.who || "somebody")} ${esc(d.last_touch.what)} · ${et(d.last_touch.at)}</span>`
                      : `<span class="meta" style="margin-left:auto">Nobody has touched this yet</span>`}</div>
     <div style="padding:12px 16px;border-bottom:1px solid #eef0f4;flex:0 1 auto;min-height:0;overflow-y:auto">
+      ${renderSummary(d)}
       <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
         ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
         ${L.wants?`<span class="kind">wants to ${esc(L.wants)}</span>`:""}</div>
@@ -1612,7 +1613,14 @@ async function loadLead(id) {
       ${onClients() ? renderToured(d) : ""}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
-    <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
+    <div style="display:flex;gap:6px;padding:8px 14px 0;border-top:1px solid #eef0f4">
+      ${["activity", "conversation"].map(t => `<span onclick="setLeadTab('${t}')" style="cursor:pointer;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;
+        border:1.5px solid ${window.__leadTab === t ? "var(--purple)" : "var(--line)"};
+        background:${window.__leadTab === t ? "var(--purple)" : "#fff"};color:${window.__leadTab === t ? "#fff" : "#5f6e8a"}">${t === "activity" ? "Everything that happened" : "Just the conversation"}</span>`).join("")}
+    </div>
+    <div id="msgs">${window.__leadTab === "activity"
+      ? renderActivity(d)
+      : ((d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`)}</div>`;
   const m = document.getElementById("msgs"); if (m) m.scrollTop = m.scrollHeight;
 }
 /* ⚠ .bub is white-space:pre-wrap, so EVERY newline and indent in this template renders as literal
@@ -1675,6 +1683,72 @@ const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it",
    The right move is assign first. On Clients the same block is the tour history, which is the part
    of a client record worth keeping, so it stays there. */
 const onClients = () => location.hash.startsWith("#/clients");
+
+/* THE SUMMARY AT THE TOP (Josh 2026-08-26: "a generative summary at the top of the client record").
+   The one generated thing on this screen. It is cached on the record and only rewritten when
+   something has actually happened since the last one, so opening a client forty times a day is not
+   forty API calls for a paragraph that has not changed. */
+function renderSummary(d) {
+  const s = d.summary || {}, L = d.lead || {};
+  return `<div style="background:#f4f1fb;border:1px solid #ddd4f5;border-radius:10px;padding:10px 13px;margin-bottom:10px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:3px">
+      <b style="font-size:12.5px;color:var(--purple)">✨ The short version</b>
+      <span style="flex:1"></span>
+      <span class="meta" id="sum-msg"></span>
+      <a href="#" onclick="refreshSummary('${L.id}');return false" style="color:var(--blue);font-size:11.5px">${s.text ? "rewrite" : "write it"}</a>
+    </div>
+    <div id="sum-body" style="font-size:13px;line-height:1.45">${s.text ? esc(s.text) : '<span class="meta">Nothing written yet — press “write it”.</span>'}</div>
+    ${s.at ? `<div class="meta" style="margin-top:4px">written ${et(s.at)}</div>` : ""}
+  </div>`;
+}
+window.refreshSummary = async (leadId) => {
+  const msg = document.getElementById("sum-msg");
+  if (msg) msg.textContent = "reading the record…";
+  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "summarise_client", lead_id: leadId, force: true }) });
+  if (r.error) { if (msg) msg.textContent = r.error; return; }
+  document.getElementById("sum-body").innerHTML = esc(r.summary || "");
+  if (msg) msg.textContent = "";
+};
+
+/* THE ACTIVITY FEED — everything that has happened to this client, in one column, each line saying
+   who did it. Assembled server-side from the tables themselves rather than narrated by a model:
+   a record has to be complete, and a model asked to retell a timeline will quietly drop things.
+   The actor badge is the point — a person, an AI that wrote those words, or an automated template.
+   Those last two are not the same thing and a CRM that merges them will get somebody blamed for a
+   sentence they never chose. */
+const ACTOR = {
+  client:     ["", "var(--line)"],
+  person:     ["👤", "var(--blue)"],
+  ai:         ["🤖 AI", "var(--purple)"],
+  automation: ["⚙ auto", "var(--line)"],
+};
+const ACTKIND = {
+  text: "💬", call: "📞", email: "✉️", note: "📝", task: "✅", task_done: "✅",
+  showing: "🏠", showing_result: "🏠", offer: "💰", offer_result: "💰",
+  agreement: "📄", agreement_signed: "✍️", status: "➡️",
+};
+function renderActivity(d) {
+  const a = d.activity || [], c = d.activity_counts || {};
+  if (!a.length) return `<div class="empty">Nothing has happened with this client yet.</div>`;
+  return `<div style="padding:10px 14px 0"><div class="meta" style="margin-bottom:6px">
+      <b>${a.length} things have happened</b> · ${c.person || 0} by a person · ${c.ai || 0} written by AI · ${c.automation || 0} automatic · ${c.client || 0} from them
+    </div></div>`
+    + a.map(x => {
+      const [badge, colour] = ACTOR[x.actor_kind] || ["", "var(--line)"];
+      return `<div class="row" style="border-left:3px solid ${colour};padding-left:10px;margin:0 14px 6px">
+        <div style="display:flex;align-items:baseline;gap:7px;flex-wrap:wrap">
+          <span>${ACTKIND[x.kind] || "•"}</span>
+          <b style="font-size:12.5px">${esc(x.title)}</b>
+          ${badge ? `<span class="kind" style="color:${colour}">${badge}</span>` : ""}
+          <span style="flex:1"></span>
+          <span class="meta">${esc(x.actor || "")} · ${et(x.at)}</span>
+        </div>
+        ${x.detail ? `<div class="meta" style="white-space:pre-wrap;margin-top:2px">${esc(String(x.detail).slice(0, 400))}</div>` : ""}
+      </div>`;
+    }).join("");
+}
+window.__leadTab = "activity";
+window.setLeadTab = (t) => { window.__leadTab = t; if (window.__lead) loadLead(window.__lead.lead.id); };
 
 /* THE STATUS, AS A FIELD (Josh 2026-08-26: "I want Lead Assigned Nurture Showing Offer Under
    Contact to all be statuses like a normal CRM").
