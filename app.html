@@ -1476,7 +1476,7 @@ function drawClients() {
       <span class="whoName">${esc(r.client)}</span>
       ${r.lane === "vl" ? `<span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>` : ""}
       ${r.do_not_contact ? `<span class="kind hot">opted out</span>` : ""}
-      <div style="margin:3px 0 1px"><span class="st" style="border-color:${colour}">${label}</span>
+      <div style="margin:3px 0 1px">${r.status ? `<span class="st" style="border-color:${(STATUS[r.status]||[])[1]||colour};font-weight:700">${(STATUS[r.status]||[r.status])[0]}</span>` : `<span class="st" style="border-color:${colour}">${label}</span>`}
         ${r.agent ? `<span class="kind lane-agent">${esc(r.agent)}</span>` : ""}
         ${r.seen ? `<span class="kind">${r.seen} seen</span>` : ""}
         ${r.notes ? `<span class="kind" title="somebody has written on this record">${r.has_pinned_note ? "📌" : "📝"} ${r.notes}</span>` : ""}</div>
@@ -1605,6 +1605,7 @@ async function loadLead(id) {
       <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}</div>
       <div id="assignbox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
+      ${renderStatus(d)}
       ${onClients() ? renderDetails(d) : ""}
       ${renderNotes(d)}
       ${onClients() ? renderTasks(d) : ""}
@@ -1674,6 +1675,62 @@ const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it",
    The right move is assign first. On Clients the same block is the tour history, which is the part
    of a client record worth keeping, so it stays there. */
 const onClients = () => location.hash.startsWith("#/clients");
+
+/* THE STATUS, AS A FIELD (Josh 2026-08-26: "I want Lead Assigned Nurture Showing Offer Under
+   Contact to all be statuses like a normal CRM").
+   It used to exist only as something recomputed while a page rendered, which is why nobody could
+   set one or ask when it last moved. Now it is stored, and the system is its usual author: an
+   assignment, a booking, an offer each move a client along on their own.
+   ⚠ A person CAN set it, and that is recorded with their name — but it does not freeze. The next
+   real event recomputes it, because a record saying "Showing" with nothing on the calendar is
+   worse than one that lags an hour. Where the two disagree, the panel says so out loud. */
+const STATUS = {
+  lead:           ["🆕 Lead",          "var(--line)",   "nobody owns this yet"],
+  assigned:       ["👤 Assigned",      "var(--blue)",   "an agent owns it, nothing booked"],
+  nurture:        ["🌱 Nurture",       "var(--purple)", "resting, the bot is working them"],
+  showing:        ["🏠 Showing",       "var(--amber)",  "booked, been, or deciding"],
+  offer:          ["💰 Offer",         "var(--blue)",   "an offer is out"],
+  under_contract: ["📝 Under contract","var(--green)",  "accepted — INRE runs it from here"],
+  referred:       ["🤝 Referred",      "var(--green)",  "another agent owns the client"],
+};
+function renderStatus(d) {
+  const L = d.lead || {}, cur = L.status || "lead";
+  const [label, colour] = STATUS[cur] || [cur, "var(--line)"];
+  const hist = d.status_history || [];
+  const last = hist[0];
+  return `<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span class="st" style="border-color:${colour};font-size:12.5px;font-weight:700">${label}</span>
+      <select id="st-pick" onchange="setStatus('${L.id}', this.value)"
+        style="padding:5px 8px;font-size:12px;border:1px solid #dbe1ea;border-radius:8px;width:auto">
+        ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}"${k === cur ? " selected" : ""}>${v[0]}</option>`).join("")}
+      </select>
+      <span class="meta">${esc((STATUS[cur] || [])[2] || "")}</span>
+    </div>
+    <div class="meta" style="margin-top:4px">
+      ${L.status_changed_at ? `Moved here ${et(L.status_changed_at)} by ${esc(L.status_changed_by || "the system")}${L.status_is_manual ? " (by hand)" : ""}` : "Never moved"}
+      ${hist.length > 1 ? ` · <a href="#" onclick="toggleStatusHistory();return false" style="color:var(--blue)">${hist.length} moves</a>` : ""}
+    </div>
+    <div id="sthist" style="display:none;margin-top:5px">
+      ${hist.map(h => `<div class="meta">${h.from_status ? esc((STATUS[h.from_status] || [h.from_status])[0]) + " → " : ""}${esc((STATUS[h.to_status] || [h.to_status])[0])} · ${esc(h.changed_by || "the system")}${h.by_kind === "human" ? "" : " ⚙"} · ${et(h.created_at)}${h.reason ? " · " + esc(h.reason) : ""}</div>`).join("")}
+    </div>
+  </div>`;
+}
+window.toggleStatusHistory = () => {
+  const b = document.getElementById("sthist");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+};
+window.setStatus = async (leadId, status) => {
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "set_status", lead_id: leadId, status, by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not changed: " + r.error); loadLead(leadId); return; }
+  // Saying nothing when the data disagrees is how a CRM starts lying to the person reading it.
+  if (r.system_says && r.system_says !== status) {
+    alert(`Set to ${(STATUS[status] || [status])[0]}.\n\n⚠ The data still says ${(STATUS[r.system_says] || [r.system_says])[0]} — nothing underneath has changed, so the next booking, offer or assignment will move it back.`);
+  }
+  loadLead(leadId);
+  if (location.hash.startsWith("#/clients")) refreshClients();
+};
 
 /* WHAT WE LEARNED ABOUT THE BUYER (Josh 2026-08-25: "build what you think we need").
    Zillow's version of a buyer is one address and a guess at a price. What comes out of a phone
