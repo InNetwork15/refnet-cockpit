@@ -1405,7 +1405,8 @@ function drawClients() {
       ${r.do_not_contact ? `<span class="kind hot">opted out</span>` : ""}
       <div style="margin:3px 0 1px"><span class="st" style="border-color:${colour}">${label}</span>
         ${r.agent ? `<span class="kind lane-agent">${esc(r.agent)}</span>` : ""}
-        ${r.seen ? `<span class="kind">${r.seen} seen</span>` : ""}</div>
+        ${r.seen ? `<span class="kind">${r.seen} seen</span>` : ""}
+        ${r.notes ? `<span class="kind" title="somebody has written on this record">${r.has_pinned_note ? "📌" : "📝"} ${r.notes}</span>` : ""}</div>
       <div class="meta">${esc(r.address || "—")}${r.city ? ", " + esc(r.city) : ""}${r.zip ? " · " + esc(r.zip) : ""}</div>
       <div class="meta">${r.price ? "$" + Number(r.price).toLocaleString() : "no price"} · ${r.last_activity ? et(r.last_activity) : "no activity"}</div>
     </div>`;
@@ -1529,7 +1530,8 @@ async function loadLead(id) {
       <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Not ready yet</button>`}</div>
       <div id="assignbox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
-      ${renderToured(d)}
+      ${renderNotes(d)}
+      ${onClients() ? renderToured(d) : ""}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
     <div id="msgs">${(d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`}</div>`;
@@ -1589,6 +1591,70 @@ const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it",
                   no_show:["🚫 no show","st-needs"], cancelled:["❌ cancelled","st-waiting"],
                   maybe:["🤔 maybe","st-waiting"], passed:["👎 passed","st-needs"],
                   offer_made:["💰 offered","st-answered"] };
+/* Josh 2026-08-25: "homes seen and schedule a showing can be removed its not needed here."
+   The lead file and the client file are the same panel, and on the LEADS inbox a lead has no agent
+   yet -- so Homes seen is always (0) and Schedule a showing asks you to book a tour for nobody.
+   The right move is assign first. On Clients the same block is the tour history, which is the part
+   of a client record worth keeping, so it stays there. */
+const onClients = () => location.hash.startsWith("#/clients");
+
+/* NOTES ON A CLIENT (Josh 2026-08-25: "turn the clients more into a CRM view where we can add
+   notes and etc.")
+   Everything else on this page is what the SYSTEM observed -- texts, calls, showings, stages. This
+   is the only place a person can write down what they know: pre-approved with the credit union,
+   the wife decides, do not ring before nine. Pinned notes sit above the running commentary because
+   a standing fact about somebody should not scroll away under three weeks of "left a voicemail".
+   No delete: a note records what was known at the time. */
+function renderNotes(d) {
+  const n = d.notes || [], L = d.lead || {};
+  return `<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <b style="font-size:13px">📝 Notes (${n.length})</b>
+      <span style="flex:1"></span>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="toggleNoteBox()">＋ Add a note</button>
+    </div>
+    <div id="notebox" style="display:none;margin-bottom:8px">
+      <textarea id="note-body" rows="3" placeholder="What do we know about them that the texts do not say?"
+        style="width:100%;padding:8px 10px;font-size:13px;font-family:inherit;border:1px solid #dbe1ea;border-radius:8px"></textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+        <label class="meta" style="display:flex;align-items:center;gap:5px;cursor:pointer">
+          <input type="checkbox" id="note-pin" style="width:auto;margin:0"> keep this one at the top</label>
+        <span style="flex:1"></span>
+        <button style="padding:5px 13px;font-size:12px" onclick="saveNote('${L.id}')">Save note</button>
+      </div>
+      <div class="meta" id="note-msg" style="margin-top:4px"></div>
+    </div>
+    ${n.length ? n.map(x => `<div class="row" style="border-left:3px solid ${x.pinned ? "var(--amber)" : "var(--line)"};padding-left:10px">
+      <div style="white-space:pre-wrap;font-size:13px">${esc(x.body)}</div>
+      <div class="meta" style="display:flex;align-items:center;gap:6px">
+        ${x.pinned ? "📌 " : ""}${esc(x.author || "someone")} · ${et(x.created_at)}
+        <span style="flex:1"></span>
+        <a href="#" onclick="pinNote('${x.id}',${x.pinned ? "false" : "true"},'${L.id}');return false" style="color:var(--blue);font-size:11px">${x.pinned ? "unpin" : "pin"}</a>
+      </div></div>`).join("")
+    : `<div class="meta">Nothing written down yet.</div>`}
+  </div>`;
+}
+window.toggleNoteBox = () => {
+  const b = document.getElementById("notebox");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+  if (b.style.display === "block") document.getElementById("note-body").focus();
+};
+window.saveNote = async (leadId) => {
+  const body = document.getElementById("note-body").value.trim();
+  const msg = document.getElementById("note-msg");
+  if (!body) { msg.textContent = "Write something first."; return; }
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "add_note", lead_id: leadId, body,
+    pinned: document.getElementById("note-pin").checked,
+    by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { msg.textContent = r.error; return; }
+  loadLead(leadId);
+};
+window.pinNote = async (noteId, pinned, leadId) => {
+  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "pin_note", note_id: noteId, pinned }) });
+  if (r.error) { alert(r.error); return; }
+  loadLead(leadId);
+};
 function renderToured(d) {
   const t = d.toured || [];
   const facts = (x) => [x.beds!=null?`${x.beds} bd`:null, x.baths!=null?`${x.baths} ba`:null,
