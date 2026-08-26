@@ -3328,14 +3328,14 @@ window.showAllowNumbers = () => {
 window.retireAllowlist = async (n) => {
   if (!confirm(`Retire the allowlist and go fully live?\n\nRight now ${n} numbers can receive an automated text and everybody else is silently skipped. After this, anything the system sends can reach ANY client on file.\n\nStill protecting you:\n  • mode — the kill switch, stops every send at once\n  • do not contact, per person\n  • each agent's own switch (nurture and the old ladders are both OFF)\n\nThe ${n} numbers are saved, and "Put the gate back" restores them along with the rules that maintain the list.`)) return;
   if (!confirm("Last check: after this, a new client can be texted automatically without anyone adding them to a list first.\n\nGo fully live?")) return;
-  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "retire_allowlist", by: (ME && ME.full_name) || "app" }) });
+  const r = await api("", { method: "POST", body: JSON.stringify({ action: "retire_allowlist", by: (ME && ME.full_name) || "app" }) });
   if (r.error) { alert("Not changed: " + r.error); return; }
   alert(`The gate is open.\n\n${r.retired_numbers} numbers retired and saved, and the ${r.triggers_removed} rules that kept refilling the list are gone — that is what stops it quietly re-arming with a single number the next time a lead arrives.`);
   viewProfile();
 };
 window.restoreAllowlist = async () => {
   if (!confirm("Put the allowlist gate back?\n\nAutomated texts will only reach the numbers that were on the saved list. Anyone else — including new clients — is silently skipped until they are added.")) return;
-  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "restore_allowlist", by: (ME && ME.full_name) || "app" }) });
+  const r = await api("", { method: "POST", body: JSON.stringify({ action: "restore_allowlist", by: (ME && ME.full_name) || "app" }) });
   if (r.error) { alert("Not changed: " + r.error); return; }
   alert(`The gate is back on ${r.restored_numbers} numbers, and the rules that keep the list topped up are running again.`);
   viewProfile();
