@@ -3288,9 +3288,23 @@ async function viewProfile() {
     hh += `<div class="row"><span class="${s==="active"?"ok":"bad"}">●</span> <span style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(s)}</span></div>`;
   hh += `<div class="row"><span class="kind">mode: ${esc(d.mode)}</span>
     ${adm ? `<button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="toggleMode('${esc(d.mode)}')">${d.mode==="live"?"⏸ Switch to TEST (kill switch — stops all sends)":"▶ Switch to LIVE"}</button>` : ""}</div>`;
-  hh += `<div class="row"><span class="meta">Allowlist (test gate — only these numbers can receive texts; empty = fully open)</span>
-    <div>${(d.allowlist||[]).map(n=>`<span class="kind">${esc(n)}${adm?` <a href="#" onclick='rmAllow(${JSON.stringify(n)});return false' style="color:var(--red)">✕</a>`:""}</span>`).join("") || '<span class="kind hot">EMPTY — sends are OPEN to anyone</span>'}
-    ${adm ? `<button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="addAllow()">+ Add number</button>` : ""}</div></div>`;
+  // Josh 2026-08-26: "get rid of that allow list because we are completely live now."
+  // The list used to print all 180 numbers with a ✕ each, which reads like the way to clear it and
+  // is a trap: the triggers put numbers back, so a hand-emptied list re-arms with one number on it
+  // and blocks everybody else. One button does the list and the triggers together, or nothing does.
+  const gateOpen = !(d.allowlist||[]).length;
+  hh += `<div class="row"><span class="meta">Who can receive an automated text</span>
+    <div style="margin-top:4px">${gateOpen
+      ? `<span class="st st-answered">🌍 Anyone on file — the allowlist gate is retired</span>
+         <div class="meta" style="margin-top:4px">What still stops a send: <b>mode</b> (the kill switch above), <b>do not contact</b> on the person, and each agent's own switch.</div>
+         ${adm ? `<button class="btn ghost" style="margin-top:6px;padding:4px 10px;font-size:12px" onclick="restoreAllowlist()">Put the gate back</button>` : ""}`
+      : `<span class="st st-needs">🔒 Gated — only ${(d.allowlist||[]).length} numbers can receive texts</span>
+         <div class="meta" style="margin-top:4px">Everyone else is silently skipped, including new clients.</div>
+         ${adm ? `<button style="margin-top:6px;padding:5px 12px;font-size:12px" onclick="retireAllowlist(${(d.allowlist||[]).length})">🌍 Go fully live — retire the allowlist</button>
+                  <button class="btn ghost" style="margin-top:6px;margin-left:6px;padding:4px 10px;font-size:12px" onclick="addAllow()">+ Add one number</button>
+                  <button class="btn ghost" style="margin-top:6px;margin-left:6px;padding:4px 10px;font-size:12px" onclick="showAllowNumbers()">See the ${(d.allowlist||[]).length} numbers</button>` : ""}`
+    }</div></div>
+    <div id="allownums" style="display:none"><div class="meta" style="margin-top:6px">${(d.allowlist||[]).map(n=>`<span class="kind">${esc(n)}${adm?` <a href="#" onclick='rmAllow(${JSON.stringify(n)});return false' style="color:var(--red)">✕</a>`:""}</span>`).join("")}</div></div>`;
   document.getElementById("ints").innerHTML = hh;
   window.__allow = d.allowlist || [];
 }
@@ -3304,6 +3318,27 @@ window.toggleMode = async (cur) => {
   if (!confirm(next === "test" ? "Switch to TEST mode? Every outbound text stops immediately (this is the kill switch)." : "Switch to LIVE mode? Sends resume, still limited to the allowlist below.")) return;
   const r = await api("", { method:"POST", body: JSON.stringify({ action:"update_setting", key:"refnet_mode", value: next }) });
   if (!r.ok) alert("Not changed: " + (r.error||"unknown")); viewProfile();
+};
+window.showAllowNumbers = () => {
+  const b = document.getElementById("allownums");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+};
+/* GO FULLY LIVE. Spells out what stops being true, because this is the last thing standing between
+   an automation and a stranger's phone, and "are you sure?" tells nobody anything. */
+window.retireAllowlist = async (n) => {
+  if (!confirm(`Retire the allowlist and go fully live?\n\nRight now ${n} numbers can receive an automated text and everybody else is silently skipped. After this, anything the system sends can reach ANY client on file.\n\nStill protecting you:\n  • mode — the kill switch, stops every send at once\n  • do not contact, per person\n  • each agent's own switch (nurture and the old ladders are both OFF)\n\nThe ${n} numbers are saved, and "Put the gate back" restores them along with the rules that maintain the list.`)) return;
+  if (!confirm("Last check: after this, a new client can be texted automatically without anyone adding them to a list first.\n\nGo fully live?")) return;
+  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "retire_allowlist", by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not changed: " + r.error); return; }
+  alert(`The gate is open.\n\n${r.retired_numbers} numbers retired and saved, and the ${r.triggers_removed} rules that kept refilling the list are gone — that is what stops it quietly re-arming with a single number the next time a lead arrives.`);
+  viewProfile();
+};
+window.restoreAllowlist = async () => {
+  if (!confirm("Put the allowlist gate back?\n\nAutomated texts will only reach the numbers that were on the saved list. Anyone else — including new clients — is silently skipped until they are added.")) return;
+  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "restore_allowlist", by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert("Not changed: " + r.error); return; }
+  alert(`The gate is back on ${r.restored_numbers} numbers, and the rules that keep the list topped up are running again.`);
+  viewProfile();
 };
 window.addAllow = async () => {
   const n = prompt("Phone number to ADD to the allowlist (e.g. 2485551234):"); if (!n) return;
