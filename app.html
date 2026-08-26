@@ -1597,46 +1597,22 @@ async function loadLead(id) {
   window.__lead = d;
   const L = d.lead || {}, el = document.getElementById("leaddetail"); if (!el) return;
   const name = `${L.first_name||""} ${L.last_name||""}`.trim() || "(no name)";
-  el.innerHTML = `<div class="thhead" style="flex-wrap:wrap">
-      <span class="whoName">${esc(name)}</span>
-      <span class="kind ${L.lane==="vl"?"":"lane-client"}" style="${L.lane==="vl"?"background:#efe7d9;color:#7a5a12":""}">${esc(LANE_LABEL[L.lane]||L.lane||"client")}</span>
-      <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span>
-      ${d.last_touch ? `<span class="meta" style="margin-left:auto">Last touch: ${esc(d.last_touch.who || "somebody")} ${esc(d.last_touch.what)} · ${et(d.last_touch.at)}</span>`
-                     : `<span class="meta" style="margin-left:auto">Nobody has touched this yet</span>`}</div>
-    <div id="leadscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
+  // ONE PLACE PER FACT (Josh 2026-08-26: "fix all the duplication and make this better").
+  // The record had grown three headers arguing with each other: the old thread bar, the new record
+  // header, and a loose block in the middle — name, phone, address, budget and who was covering all
+  // appeared twice, and the status showed as a chip AND a dropdown of the same word. Everything is
+  // a card now, each fact lives in exactly one of them, and the actions sit with the thing they act on.
+  el.innerHTML = `<div id="leadscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
     ${renderRecordHead(d)}
     ${renderOutreach(d)}
+    ${renderStands(d)}
+    ${renderSummary(d)}
     ${renderContactCard(d)}
-    <div style="padding:0 0 4px;flex:none">
-      ${renderSummary(d)}
-      <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
-        ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
-        ${L.wants?`<span class="kind">wants to ${esc(L.wants)}</span>`:""}</div>
-      ${L.why?`<div class="meta" style="font-size:12.5px"><b>Why:</b> ${esc(L.why)}</div>`:`<div class="meta">No reasoning recorded.</div>`}
-      <div class="meta" style="margin-top:6px">${esc(L.first_inquiry_address||"")}${L.first_inquiry_city?", "+esc(L.first_inquiry_city):""}
-        ${L.est_purchase_price?" · $"+Number(L.est_purchase_price).toLocaleString():""}${L.zip?" · "+esc(L.zip):""}</div>
-      ${(d.recruiting_jobs||[]).length?`<div class="meta" style="margin-top:6px">Recruiting: ${(d.recruiting_jobs||[]).map(j=>`${esc(j.status)} — ${esc(j.property_address||j.gap_city||"")} (${j.candidates} candidates)`).join(" · ")}</div>`:""}
-      ${d.land_walk?`<div class="meta" style="margin-top:6px">Walk permission: <b>${esc(d.land_walk.permission_status)}</b>${d.land_walk.listing_agent_name?" · "+esc(d.land_walk.listing_agent_name):""}</div>`:""}
-      ${d.coverage ? `<div style="margin-top:10px;background:#e9f9f2;border:1px solid #b9e6d0;border-radius:10px;padding:9px 12px">
-        <b style="color:var(--green)">✅ ${esc(d.coverage.agent)} is covering this${d.coverage.is_team ? " (in-house)" : ""}</b>
-        <div class="meta">${esc(d.coverage.address || L.first_inquiry_address || "")}${d.coverage.phone ? " · " + esc(fmtPh(d.coverage.phone)) : ""} · ${esc(String(d.coverage.status || "").replace(/_/g, " "))}</div></div>`
-        : `<div style="margin-top:10px" class="meta">Nobody is covering this yet.</div>`}
-      ${d.nurture ? `<div style="margin-top:10px;background:#f4f1fb;border:1px solid #ddd4f5;border-radius:10px;padding:9px 12px">
-        <b style="color:var(--purple)">🌱 Nurturing — not ready yet</b>
-        <div class="meta">${d.nurture.note ? esc(d.nurture.note) + " · " : ""}set by ${esc(d.nurture.by || "someone")} ${et(d.nurture.since)}${d.nurture.check_at ? " · checking back " + et(d.nurture.check_at) : ""}</div>
-        <button class="btn ghost" style="margin-top:6px;padding:4px 10px;font-size:11.5px" onclick="endNurture('${L.id}')">Back to active</button></div>` : ""}
-      ${d.referred ? `<div style="margin-top:10px;background:#eef4ff;border:1px solid #cfe0fb;border-radius:10px;padding:9px 12px">
-        <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
-        <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
-        <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}</div>
-      <div id="assignbox" style="display:none;margin-top:10px"></div>
-      <div id="recruitbox" style="display:none;margin-top:10px"></div>
+    <div style="flex:none">
       ${onClients() ? renderDetails(d) : ""}
       ${renderNotes(d)}
       ${onClients() ? renderTasks(d) : ""}
       ${onClients() ? renderToured(d) : ""}
-      ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
     <div style="display:flex;gap:6px;padding:8px 14px;border-top:1px solid #eef0f4;position:sticky;top:0;background:#fff;z-index:2;flex:none">
       ${["activity", "conversation"].map(t => `<span onclick="setLeadTab('${t}')" style="cursor:pointer;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;
@@ -1737,12 +1713,11 @@ function renderRecordHead(d) {
       <div style="flex:1;min-width:0">
         <div class="rname">${esc(name)}</div>
         <div class="rsub">${esc([L.first_inquiry_city, L.zip].filter(Boolean).join(" · ")) || "—"}${L.lane === "vl" ? ' · <b style="color:#7a5a12">vacant land</b>' : ""}</div>
-        <div class="rsub">${esc(L.first_inquiry_address || "")}${band ? " · " + band : ""}</div>
+        <div class="rsub">${esc(L.first_inquiry_address || "")}</div>
         ${d.coverage ? `<div class="rsub">🤝 <b style="color:var(--green)">${esc(d.coverage.agent)}</b> is covering this${d.coverage.is_team ? " (in-house)" : ""}</div>` : `<div class="rsub">Nobody is covering this yet</div>`}
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
-      <span class="st" style="border-color:${colour};font-weight:700">${label}</span>
       <select id="st-pick" onchange="setStatus('${L.id}', this.value)"
         style="padding:6px 9px;font-size:12.5px;border:1px solid #cfdcf2;border-radius:9px;width:auto;background:#fff">
         ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}"${k === cur ? " selected" : ""}>${v[0]}</option>`).join("")}
@@ -1771,6 +1746,37 @@ function renderOutreach(d) {
   return card("📣", "Outreach", body, "#ffe6d6");
 }
 window.jumpToThread = (phone) => { location.hash = "#/messages"; setTimeout(() => { if (window.openThreadByPhone) window.openThreadByPhone(phone); }, 300); };
+
+/* WHERE THIS STANDS — why they came to us, who owns them, and the two buttons that change either.
+   These used to be a loose block under the header repeating the address, the price and the covering
+   agent the header already showed. Only what is NOT upstairs survives here, and the actions live
+   with it, because "assign an agent" is the answer to "nobody is covering this yet". */
+function renderStands(d) {
+  const L = d.lead || {};
+  const bits = [];
+  bits.push(`<div style="margin-bottom:5px"><b style="font-size:13.5px">${esc(L.intent_label || L.intent || "Unclear")}</b>
+    ${L.tour_time ? `<span class="kind lane-agent">${esc(L.tour_time)}</span>` : ""}
+    ${L.wants ? `<span class="kind">wants to ${esc(L.wants)}</span>` : ""}</div>`);
+  bits.push(L.why ? `<div class="meta" style="font-size:12.5px"><b>Why:</b> ${esc(L.why)}</div>`
+                  : `<div class="meta">No reasoning recorded.</div>`);
+  if ((d.recruiting_jobs || []).length) bits.push(`<div class="meta" style="margin-top:6px">Recruiting: ${d.recruiting_jobs.map(j => `${esc(j.status)} — ${esc(j.property_address || j.gap_city || "")} (${j.candidates} candidates)`).join(" · ")}</div>`);
+  if (d.land_walk) bits.push(`<div class="meta" style="margin-top:6px">Walk permission: <b>${esc(d.land_walk.permission_status)}</b>${d.land_walk.listing_agent_name ? " · " + esc(d.land_walk.listing_agent_name) : ""}</div>`);
+  if (d.nurture) bits.push(`<div style="margin-top:9px;background:#f8f6fe;border:1px solid #e4dcf8;border-radius:10px;padding:9px 11px">
+    <b style="color:var(--purple)">🌱 Resting — not ready yet</b>
+    <div class="meta">${d.nurture.note ? esc(d.nurture.note) + " · " : ""}set by ${esc(d.nurture.by || "someone")} ${et(d.nurture.since)}${d.nurture.check_at ? " · a person looks again " + et(d.nurture.check_at) : ""}</div>
+    <button class="btn ghost" style="margin-top:6px;padding:4px 10px;font-size:11.5px" onclick="endNurture('${L.id}')">Back to active</button></div>`);
+  if (d.referred) bits.push(`<div style="margin-top:9px;background:#f2f7ff;border:1px solid #d8e6fb;border-radius:10px;padding:9px 11px">
+    <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage ? `<span class="meta"> · ${esc(d.referred.brokerage)}</span>` : ""}
+    <div class="meta">${esc(d.referred.by || "someone")} handed them over ${et(d.referred.at)}${d.referred.fee_pct != null ? ` · ${esc(d.referred.fee_pct)}% referral fee` : ` · <b>referral fee not set</b>`}</div>
+    <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>`);
+  if ((d.commitments || []).length) bits.push(`<div class="meta" style="margin-top:8px"><b>Promises we made (${d.commitments.length})</b>${d.commitments.map(c => `<div>• ${esc(c.title)} — ${esc(c.owner_name || "unassigned")}</div>`).join("")}<a href="#/owed" style="color:var(--blue)">Open Owed to send them →</a></div>`);
+  bits.push(`<div style="margin-top:11px;display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>
+    ${d.nurture ? "" : `<button class="btn ghost" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}</div>
+    <div id="assignbox" style="display:none;margin-top:10px"></div>
+    <div id="recruitbox" style="display:none;margin-top:10px"></div>`);
+  return card("🧭", "Where this stands", bits.join(""), "#dbe7fb");
+}
 
 /* Contact details, always editable and saved when you leave the box — the recruiting platform's
    "autosaves on blur". A Save button on a four-field form is a click that exists to reassure the
@@ -1948,8 +1954,7 @@ function renderDetails(d) {
   const line = (label, val) => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0">
     <span class="meta" style="min-width:92px">${label}</span><span>${val ? esc(val) : '<span class="meta">—</span>'}</span></div>`;
   return card("🗂", "The file", `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
-      <b style="font-size:13px">🗂 The file</b>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
       ${L.details_updated_by ? `<span class="meta">updated by ${esc(L.details_updated_by)} ${et(L.details_updated_at)}</span>` : ""}
       <span style="flex:1"></span>
       <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="toggleDetails()">✏️ Edit</button>
