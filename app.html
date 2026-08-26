@@ -3281,7 +3281,9 @@ async function viewProfile() {
   }
   hh += `<div class="row"><span class="meta">Sending lines</span><div>client: <b>${esc(d.config?.client_line)}</b> · recruiting: <b>${esc(d.config?.outreach_line)}</b>
     ${adm ? `<button class="btn ghost" style="margin-left:8px;padding:4px 10px;font-size:12px" onclick="updSetting('refnet_rc_sms_from','New CLIENT sending number (the line texts come from):')">Change client line</button>
-    <button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="updSetting('refnet_outreach_from','New RECRUITING sending number:')">Change recruiting line</button>` : ""}</div></div>`;
+    <button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="updSetting('refnet_outreach_from','New RECRUITING sending number:')">Change recruiting line</button>
+    <button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="updSetting('refnet_nurture_from','NURTURE sending number (the line the nurture bot texts from, speaking as Tony).\\n\\n⚠ Paste its extension JWT too, or sends stay on Tony own line — a number and its JWT must come from the SAME RingCentral extension or RC answers 403.')">Change nurture line</button>
+    <button class="btn ghost" style="padding:4px 10px;font-size:12px" onclick="updSetting('refnet_rc_nurture_jwt','JWT for the NURTURE extension.\\n\\nRingCentral issues one JWT per extension. This must be the JWT of the extension that OWNS the nurture number, not the main one.')">Nurture line JWT</button>` : ""}</div></div>`;
   for (const [label, s] of Object.entries(d.subscriptions||{}))
     hh += `<div class="row"><span class="${s==="active"?"ok":"bad"}">●</span> <span style="margin-left:6px">${esc(label)}</span> <span class="meta" style="margin-left:8px">${esc(s)}</span></div>`;
   hh += `<div class="row"><span class="kind">mode: ${esc(d.mode)}</span>
