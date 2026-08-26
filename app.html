@@ -350,20 +350,93 @@ window.addEventListener("hashchange", route);
    so both sat in "nobody is covering this yet". Nurturing asks for a reason and a date, because
    "not ready" with neither is indistinguishable from neglect when you read it back next month.
    It closes any recruiting for them and books a task to bring them back. */
+/* ONE NURTURE BUTTON, EVERYWHERE (Josh 2026-08-25: "When we click not ready yet on the leads page
+   and when we click on the Nurture button on the assigned page or the Showings or offers or under
+   contract page. These should all be the same button.")
+   It was already one function, but it wore two labels and asked its questions through two prompt()
+   boxes, so the same decision felt like a different decision depending on which page you were on.
+   Now it is one dialog with one label wherever you meet it.
+
+   The REASON is a code, not prose, because refnet-nurture writes from it: somebody waiting on a
+   mortgage and somebody who lost the house they loved need different messages six weeks apart.
+   "🤖 Read the conversation" fills the form in from what was actually said -- it does not submit
+   it, because the reason drives months of messages and a human should agree with it first. */
+const NREASON = [
+  ["timing",       "⏳ Timing",          "Not for a while yet"],
+  ["financing",    "🏦 Financing",       "Mortgage, credit, or cash not ready"],
+  ["sell_first",   "🏠 Sell first",      "Has to sell their own place"],
+  ["lost_house",   "💔 Lost the house",  "Missed out on one they wanted"],
+  ["nothing_fits", "🔍 Nothing fits",    "Market has nothing for them"],
+  ["unresponsive", "🔇 Went quiet",      "Stopped answering, no reason given"],
+  ["other",        "✍️ Other",           "Say it in the note"],
+];
+window.__nrs = null;
+window.pickNReason = (k) => { window.__nrs = k; drawNReasons(); };
+function drawNReasons() {
+  document.getElementById("nrs").innerHTML = NREASON.map(([k, label, blurb]) => {
+    const on = window.__nrs === k;
+    return `<div onclick="pickNReason('${k}')" style="cursor:pointer;border:1.5px solid ${on ? "var(--purple)" : "var(--line)"};
+      background:${on ? "#f4f1fb" : "#fff"};border-radius:10px;padding:7px 11px;flex:1 1 150px;min-width:150px">
+      <div style="font-size:12.5px;font-weight:700;color:${on ? "var(--purple)" : "#33415c"}">${label}</div>
+      <div class="meta" style="font-size:11px">${blurb}</div></div>`;
+  }).join("");
+}
 window.nurtureLead = async (leadId) => {
-  const note = prompt("Why is this one not ready?\n\ne.g. \"non-responsive, just browsing\", \"selling their place first\", \"financing not sorted\".\n\nThis is what you will read when they resurface.");
-  if (note === null) return;
-  const raw = prompt("Check back in how many days?", "14");
-  if (raw === null) return;
-  const days = Number(raw) || 14;
-  const r = await lapi("", { method:"POST", body: JSON.stringify({
-    action:"set_nurture", lead_id: leadId, note, check_in_days: days, by: (ME && ME.full_name) || "app" }) });
-  if (r.error) { alert("Not saved: " + r.error); return; }
-  alert("Moved to nurture. Any recruiting for them is closed, and a task will bring them back in " + days + " days.");
-  if (location.hash.startsWith("#/assigned")) { viewAssigned(); return; }
-  if (location.hash.startsWith("#/nurture")) { viewNurture(); return; }
-  if (location.hash.startsWith("#/showings")) { viewShowings(); return; }
-  afterLeadAction(leadId);
+  window.__nrs = null;
+  const ov = popup(`<h2>🌱 Nurture</h2><div class="body">
+    <div class="meta" style="margin-bottom:8px">Park them and let the follow-up run. The reason decides what the AI writes to them, so pick the one that is actually true.</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <b style="font-size:12.5px">Why are they not ready?</b>
+      <span style="flex:1"></span>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="aiReadNurture('${leadId}')">🤖 Read the conversation</button>
+    </div>
+    <div id="nrs" style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:9px"></div>
+    <div class="meta" style="margin-bottom:3px">In your words — this is what you will read when they resurface</div>
+    <input id="nrs-note" placeholder="e.g. closing on their own place mid-October" style="width:100%;margin-bottom:9px">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div><div class="meta" style="margin-bottom:3px">A person looks again in</div>
+        <input id="nrs-days" type="number" value="14" style="width:90px"> </div>
+      <span class="meta" style="padding-bottom:8px">days</span>
+    </div>
+    <div class="meta" style="margin-top:9px">The AI keeps working them the whole time — aiming at one thing, getting them back out to see a home — and stops the moment they answer.</div>
+    <div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+      <button id="nrs-go">Move to nurture</button>
+      <button class="btn ghost" onclick="this.closest('div[style*=fixed]').remove()">Cancel</button>
+      <span class="meta" id="nrs-msg" style="margin-left:auto"></span>
+    </div></div>`);
+  drawNReasons();
+  document.getElementById("nrs-go").onclick = async () => {
+    const msg = document.getElementById("nrs-msg");
+    if (!window.__nrs) { msg.textContent = "Pick a reason first."; return; }
+    const days = Number(document.getElementById("nrs-days").value) || 14;
+    document.getElementById("nrs-go").disabled = true;
+    const r = await lapi("", { method: "POST", body: JSON.stringify({
+      action: "set_nurture", lead_id: leadId, reason: window.__nrs,
+      note: document.getElementById("nrs-note").value.trim(),
+      ai_read: window.__nrsAi || null,
+      check_in_days: days, by: (ME && ME.full_name) || "app" }) });
+    if (r.error) { msg.textContent = r.error; document.getElementById("nrs-go").disabled = false; return; }
+    ov.remove();
+    window.__nrsAi = null;
+    if (location.hash.startsWith("#/assigned")) { viewAssigned(); return; }
+    if (location.hash.startsWith("#/nurture")) { viewNurture(); return; }
+    if (location.hash.startsWith("#/showings")) { viewShowings(); return; }
+    if (location.hash.startsWith("#/offers")) { viewOffers(); return; }
+    if (location.hash.startsWith("#/contract")) { viewContract(); return; }
+    afterLeadAction(leadId);
+  };
+};
+window.aiReadNurture = async (leadId) => {
+  const msg = document.getElementById("nrs-msg");
+  msg.textContent = "Reading…";
+  const r = await lapi("", { method: "POST", body: JSON.stringify({ action: "read_nurture_reason", lead_id: leadId }) });
+  if (r.error) { msg.textContent = r.error; return; }
+  if (!r.reason) { msg.textContent = r.why || "nothing to read yet"; return; }
+  window.__nrs = r.reason; window.__nrsAi = r.note || null;
+  drawNReasons();
+  if (r.note) document.getElementById("nrs-note").value = r.note;
+  if (r.days) document.getElementById("nrs-days").value = r.days;
+  msg.textContent = "Read from the conversation — change anything that is wrong.";
 };
 window.endNurture = async (leadId) => {
   if (!confirm("Put this lead back into the active pipeline?")) return;
@@ -1529,7 +1602,7 @@ async function loadLead(id) {
         <b style="color:var(--blue)">🤝 Referred to ${esc(d.referred.agent)}</b>${d.referred.brokerage?`<span class="meta"> · ${esc(d.referred.brokerage)}</span>`:""}
         <div class="meta">${esc(d.referred.by||"someone")} handed this client over ${et(d.referred.at)}${d.referred.fee_pct!=null?` · ${esc(d.referred.fee_pct)}% referral fee`:` · <b>referral fee not set</b>`}${d.referred.note?` · ${esc(d.referred.note)}`:""}</div>
         <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>` : ""}
-      <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Not ready yet</button>`}</div>
+      <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}</div>
       <div id="assignbox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
       ${onClients() ? renderDetails(d) : ""}
@@ -2906,7 +2979,10 @@ async function viewContract() {
         ${o.inre_transaction_id ? `<span class="kind lane-agent">INRE ${esc(o.inre_transaction_id)}</span>` : ""}
       </div>
       <div class="meta">${esc(o.address || "")}${o.agent ? " · " + esc(o.agent) : ""} · accepted ${et(o.offered_at)}</div>
-      ${o.awaiting_handoff ? `<div style="margin-top:6px"><button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button></div>` : ""}
+      <div style="margin-top:6px">
+        ${o.awaiting_handoff ? `<button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button>` : ""}
+        <button class="btn ghost" style="margin-left:${o.awaiting_handoff ? "6px" : "0"}" onclick="nurtureLead('${o.lead_id}')">🌱 Nurture</button>
+      </div>
     </div>`).join("")
     : `<div class="empty">Nothing is under contract yet. Accepted offers land here from <a href="#/offers" style="color:var(--blue)">Offers</a>.</div>`;
 }
@@ -2939,6 +3015,7 @@ async function viewOffers() {
           <button class="btn ghost" style="margin-left:6px" onclick="settleOffer('${o.id}','rejected')">Rejected</button>
           <button class="btn ghost" style="margin-left:6px" onclick="settleOffer('${o.id}','withdrawn')">Withdrawn</button>`:""}
         ${o.awaiting_handoff?`<button onclick="handOff('${o.id}')">🔗 Record the INRE transaction</button>`:""}
+        <button class="btn ghost" style="margin-left:6px" onclick="nurtureLead('${o.lead_id}')">🌱 Nurture</button>
       </div></div>`).join("")
     : `<div class="empty">No live offers. Log one from a showing that has happened.</div>`;
 }
