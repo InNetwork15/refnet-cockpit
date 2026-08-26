@@ -1505,7 +1505,9 @@ async function loadLead(id) {
   el.innerHTML = `<div class="thhead" style="flex-wrap:wrap">
       <span class="whoName">${esc(name)}</span>
       <span class="kind ${L.lane==="vl"?"":"lane-client"}" style="${L.lane==="vl"?"background:#efe7d9;color:#7a5a12":""}">${esc(LANE_LABEL[L.lane]||L.lane||"client")}</span>
-      <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span></div>
+      <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span>
+      ${d.last_touch ? `<span class="meta" style="margin-left:auto">Last touch: ${esc(d.last_touch.who || "somebody")} ${esc(d.last_touch.what)} · ${et(d.last_touch.at)}</span>`
+                     : `<span class="meta" style="margin-left:auto">Nobody has touched this yet</span>`}</div>
     <div style="padding:12px 16px;border-bottom:1px solid #eef0f4;flex:0 1 auto;min-height:0;overflow-y:auto">
       <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
         ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
@@ -1530,7 +1532,9 @@ async function loadLead(id) {
       <div style="margin-top:10px"><button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>${d.nurture ? "" : `<button class="btn ghost" style="margin-left:8px" onclick="nurtureLead('${L.id}')">🌱 Not ready yet</button>`}</div>
       <div id="assignbox" style="display:none;margin-top:10px"></div>
       <div id="recruitbox" style="display:none;margin-top:10px"></div>
+      ${onClients() ? renderDetails(d) : ""}
       ${renderNotes(d)}
+      ${onClients() ? renderTasks(d) : ""}
       ${onClients() ? renderToured(d) : ""}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
@@ -1597,6 +1601,151 @@ const OUTCOME = { loved:["💚 loved it","st-answered"], liked:["🙂 liked it",
    The right move is assign first. On Clients the same block is the tour history, which is the part
    of a client record worth keeping, so it stays there. */
 const onClients = () => location.hash.startsWith("#/clients");
+
+/* WHAT WE LEARNED ABOUT THE BUYER (Josh 2026-08-25: "build what you think we need").
+   Zillow's version of a buyer is one address and a guess at a price. What comes out of a phone
+   call -- the real ceiling, cash or not, which counties they will actually drive to -- had nowhere
+   to live but prose, and prose cannot be matched to an agent or handed to a recruiter.
+   ⚠ The PHONE NUMBER is shown but never editable: every inbound text and call is matched to a lead
+   by its digits, so retyping it here would silently detach the whole conversation from the person.
+   Every save writes a note saying what changed, because a field that quietly changes value is
+   worse than no field -- six weeks on, nobody can tell a real budget move from a typo. */
+const FINANCING = { cash: "💵 cash", preapproved: "✅ pre-approved", needs_lender: "⚠ needs a lender", unknown: "not asked yet" };
+const money = (v) => v == null || v === "" ? null : "$" + Number(v).toLocaleString("en-US");
+function renderDetails(d) {
+  const L = d.lead || {};
+  const band = L.budget_min != null && L.est_purchase_price != null
+    ? `${money(L.budget_min)} – ${money(L.est_purchase_price)}`
+    : (money(L.est_purchase_price) ? "up to " + money(L.est_purchase_price) : (money(L.budget_min) ? "from " + money(L.budget_min) : null));
+  const line = (label, val) => `<div style="display:flex;gap:8px;font-size:12.5px;padding:2px 0">
+    <span class="meta" style="min-width:92px">${label}</span><span>${val ? esc(val) : '<span class="meta">—</span>'}</span></div>`;
+  return `<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <b style="font-size:13px">🗂 The file</b>
+      ${L.details_updated_by ? `<span class="meta">updated by ${esc(L.details_updated_by)} ${et(L.details_updated_at)}</span>` : ""}
+      <span style="flex:1"></span>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="toggleDetails()">✏️ Edit</button>
+    </div>
+    <div id="detview">
+      ${line("Budget", band)}
+      ${line("Timeline", L.timeline)}
+      ${line("Financing", FINANCING[L.financing] || null)}
+      ${line("Areas", L.wants_areas)}
+      ${line("Must-haves", L.must_haves)}
+      ${line("Email", L.email)}
+    </div>
+    <div id="detedit" style="display:none">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <div><div class="meta" style="margin-bottom:3px">Budget from</div>
+          <input id="det-min" type="number" value="${L.budget_min ?? ""}" placeholder="150000" style="width:130px"></div>
+        <div><div class="meta" style="margin-bottom:3px">up to</div>
+          <input id="det-max" type="number" value="${L.est_purchase_price ?? ""}" placeholder="210000" style="width:130px"></div>
+        <div><div class="meta" style="margin-bottom:3px">Timeline</div>
+          <input id="det-timeline" value="${esc(L.timeline || "")}" placeholder="30–60 days" style="width:150px"></div>
+        <div><div class="meta" style="margin-bottom:3px">Financing</div>
+          <select id="det-financing" style="width:160px;padding:7px 8px;border:1px solid #dbe1ea;border-radius:8px">
+            <option value="">—</option>
+            ${Object.entries(FINANCING).map(([k, v]) => `<option value="${k}"${L.financing === k ? " selected" : ""}>${v}</option>`).join("")}
+          </select></div>
+      </div>
+      <div class="meta" style="margin-bottom:3px">Areas they will actually drive to</div>
+      <input id="det-areas" value="${esc(L.wants_areas || "")}" placeholder="Charlevoix, Emmet — not east of Gaylord" style="width:100%;margin-bottom:6px">
+      <div class="meta" style="margin-bottom:3px">Must-haves</div>
+      <input id="det-must" value="${esc(L.must_haves || "")}" placeholder="3 bed, pole barn, no dirt road" style="width:100%;margin-bottom:6px">
+      <div class="meta" style="margin-bottom:3px">Email</div>
+      <input id="det-email" value="${esc(L.email || "")}" style="width:100%;margin-bottom:6px">
+      <div class="meta" style="margin-bottom:8px">Phone stays as it is — every text and call is matched to this client by that number.</div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <button style="padding:5px 13px;font-size:12px" onclick="saveDetails('${L.id}')">Save the file</button>
+        <button class="btn ghost" style="padding:5px 13px;font-size:12px" onclick="toggleDetails()">Cancel</button>
+        <span class="meta" id="det-msg"></span>
+      </div>
+    </div>
+  </div>`;
+}
+window.toggleDetails = () => {
+  const v = document.getElementById("detview"), e = document.getElementById("detedit");
+  const editing = e.style.display !== "none";
+  e.style.display = editing ? "none" : "block";
+  v.style.display = editing ? "block" : "none";
+};
+window.saveDetails = async (leadId) => {
+  const val = (id) => document.getElementById(id).value;
+  const msg = document.getElementById("det-msg");
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "update_client_details", lead_id: leadId, by: (ME && ME.full_name) || "app",
+    budget_min: val("det-min"), est_purchase_price: val("det-max"),
+    timeline: val("det-timeline"), financing: val("det-financing"),
+    wants_areas: val("det-areas"), must_haves: val("det-must"), email: val("det-email") }) });
+  if (r.error) { msg.textContent = r.error; return; }
+  loadLead(leadId);
+  if (location.hash.startsWith("#/clients")) refreshClients();
+};
+
+/* FOLLOW-UPS ON THE RECORD.
+   The SAME refnet_tasks the Commitment Keeper writes into when it hears us promise something on a
+   call -- not a second to-do list. That matters: the 7 AM Daily Brief reads today's tasks out to
+   Tony, and anything past due raises an overdue alert. A parallel list would be a list nobody reads.
+   Nothing here texts a client. */
+function renderTasks(d) {
+  const all = d.tasks || [], open = all.filter(t => t.status !== "done"), done = all.filter(t => t.status === "done").slice(0, 3);
+  const overdue = (t) => t.due_at && new Date(t.due_at) < new Date();
+  return `<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:5px">
+      <b style="font-size:13px">✅ Follow-ups (${open.length})</b>
+      <span style="flex:1"></span>
+      <button class="btn ghost" style="padding:4px 11px;font-size:11.5px" onclick="toggleTaskBox()">＋ Add one</button>
+    </div>
+    <div id="taskbox" style="display:none;margin-bottom:8px">
+      <input id="task-title" placeholder="What needs doing? (e.g. send the Rudyard comps)" style="width:100%;margin-bottom:6px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div><div class="meta" style="margin-bottom:3px">Due</div><input type="date" id="task-due" style="width:170px"></div>
+        <div><div class="meta" style="margin-bottom:3px">Who</div>
+          <select id="task-owner" style="width:150px;padding:7px 8px;border:1px solid #dbe1ea;border-radius:8px">
+            <option value="tony">Tony</option><option value="tj">TJ</option><option value="team">Whoever picks it up</option>
+          </select></div>
+        <button style="padding:5px 13px;font-size:12px" onclick="saveTask('${(d.lead||{}).id}')">Add it</button>
+      </div>
+      <div class="meta" style="margin-top:5px">Due today means it shows up in the 7 AM brief. Past due raises an alert. Nothing is sent to the client.</div>
+      <div class="meta" id="task-msg"></div>
+    </div>
+    ${open.length ? open.map(t => `<div class="row" style="border-left:3px solid ${overdue(t) ? "var(--red)" : "var(--line)"};padding-left:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:13px">${esc(t.title)}</span>
+        <span style="flex:1"></span>
+        <button class="btn ghost" style="padding:3px 9px;font-size:11px" onclick="finishTask('${t.id}','${(d.lead||{}).id}')">✓ Done</button>
+      </div>
+      <div class="meta">${t.due_at ? (overdue(t) ? "⚠ was due " : "due ") + et(t.due_at) : "no date"}${t.owner_name ? " · " + esc(t.owner_name) : t.owner_kind ? " · " + esc(t.owner_kind) : ""}${t.source && t.source !== "app" ? " · from a " + esc(String(t.source).replace(/_/g, " ")) : ""}</div>
+    </div>`).join("") : `<div class="meta">Nothing outstanding.</div>`}
+    ${done.length ? `<div class="meta" style="margin-top:5px">Done: ${done.map(t => `${esc(t.title)} (${esc(t.done_by || "someone")})`).join(" · ")}</div>` : ""}
+  </div>`;
+}
+window.toggleTaskBox = () => {
+  const b = document.getElementById("taskbox");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+  if (b.style.display === "block") document.getElementById("task-title").focus();
+};
+window.saveTask = async (leadId) => {
+  const title = document.getElementById("task-title").value.trim();
+  const msg = document.getElementById("task-msg");
+  if (!title) { msg.textContent = "Say what needs doing first."; return; }
+  const due = document.getElementById("task-due").value;
+  const owner = document.getElementById("task-owner").value;
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "add_task", lead_id: leadId, title,
+    // a date with no time means the end of that working day in Eastern, not midnight UTC
+    due_at: due ? etWallToIso(due, "17:00") : null,
+    owner_kind: owner, owner_name: owner === "tony" ? "Tony Wright" : owner === "tj" ? "TJ Blaszyk" : null,
+    by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { msg.textContent = r.error; return; }
+  loadLead(leadId);
+};
+window.finishTask = async (taskId, leadId) => {
+  const r = await lapi("", { method: "POST", body: JSON.stringify({
+    action: "complete_task", task_id: taskId, by: (ME && ME.full_name) || "app" }) });
+  if (r.error) { alert(r.error); return; }
+  loadLead(leadId);
+};
 
 /* NOTES ON A CLIENT (Josh 2026-08-25: "turn the clients more into a CRM view where we can add
    notes and etc.")
