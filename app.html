@@ -1581,7 +1581,8 @@ async function loadLead(id) {
       <span class="meta">${esc(L.phone||"")} ${L.email?"· "+esc(L.email):""}</span>
       ${d.last_touch ? `<span class="meta" style="margin-left:auto">Last touch: ${esc(d.last_touch.who || "somebody")} ${esc(d.last_touch.what)} · ${et(d.last_touch.at)}</span>`
                      : `<span class="meta" style="margin-left:auto">Nobody has touched this yet</span>`}</div>
-    <div style="padding:12px 16px;border-bottom:1px solid #eef0f4;flex:0 1 auto;min-height:0;overflow-y:auto">
+    <div id="leadscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
+    <div style="padding:12px 16px;border-bottom:1px solid #eef0f4;flex:none">
       ${renderSummary(d)}
       <div style="margin-bottom:6px"><b>${esc(L.intent_label||L.intent||"Unclear")}</b>
         ${L.tour_time?`<span class="kind lane-agent">${esc(L.tour_time)}</span>`:""}
@@ -1613,15 +1614,18 @@ async function loadLead(id) {
       ${onClients() ? renderToured(d) : ""}
       ${(d.commitments||[]).length?`<div style="margin-top:10px;border-top:1px solid #eef0f4;padding-top:8px"><div class="meta" style="margin-bottom:4px"><b>Promises we made (${(d.commitments||[]).length})</b></div>${d.commitments.map(c=>`<div class="meta" style="margin-bottom:3px">• ${esc(c.title)} — ${esc(c.owner_name||"unassigned")}</div>`).join("")}<a href="#/owed" class="meta">Open the Owed screen to send them →</a></div>`:""}
     </div>
-    <div style="display:flex;gap:6px;padding:8px 14px 0;border-top:1px solid #eef0f4">
+    <div style="display:flex;gap:6px;padding:8px 14px;border-top:1px solid #eef0f4;position:sticky;top:0;background:#fff;z-index:2;flex:none">
       ${["activity", "conversation"].map(t => `<span onclick="setLeadTab('${t}')" style="cursor:pointer;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;
         border:1.5px solid ${window.__leadTab === t ? "var(--purple)" : "var(--line)"};
         background:${window.__leadTab === t ? "var(--purple)" : "#fff"};color:${window.__leadTab === t ? "#fff" : "#5f6e8a"}">${t === "activity" ? "Everything that happened" : "Just the conversation"}</span>`).join("")}
     </div>
-    <div id="msgs">${window.__leadTab === "activity"
+    <div id="msgs" style="flex:none;overflow:visible;min-height:0">${window.__leadTab === "activity"
       ? renderActivity(d)
-      : ((d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`)}</div>`;
-  const m = document.getElementById("msgs"); if (m) m.scrollTop = m.scrollHeight;
+      : ((d.timeline||[]).slice().reverse().map(t => renderTimelineItem(t)).join("") || `<div class="empty">No conversation yet.</div>`)}</div></div>`;
+  // the conversation reads newest-at-the-bottom, so it jumps; the activity feed is newest-first
+  // and must open where the eye starts -- at the top
+  const sc = document.getElementById("leadscroll");
+  if (sc) sc.scrollTop = 0;
 }
 /* ⚠ .bub is white-space:pre-wrap, so EVERY newline and indent in this template renders as literal
    blank lines inside the bubble. This function used to be written across several indented lines
