@@ -77,12 +77,16 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
    this way"). A record is a stack of CARDS, each one a titled box with a coloured icon, rather than
    a wall of headings and rules. It reads as separate things you can deal with separately, which is
    what a person opening a client actually wants. */
-.rhead{background:linear-gradient(180deg,#eef4ff 0%,#f8fbff 100%);border-bottom:1px solid #dfe8f7;padding:16px 18px}
+.rhead{flex:none;background:linear-gradient(180deg,#eef4ff 0%,#f8fbff 100%);border-bottom:1px solid #dfe8f7;padding:16px 18px}
 .ravatar{width:54px;height:54px;border-radius:50%;background:var(--blue);color:#fff;display:flex;
   align-items:center;justify-content:center;font-weight:800;font-size:18px;letter-spacing:.5px;flex:none}
 .rname{font-size:20px;font-weight:800;color:var(--brand);line-height:1.15}
 .rsub{font-size:13px;color:var(--muted);line-height:1.5}
-.rcard{background:#fff;border:1px solid var(--line);border-radius:14px;margin:12px 14px;overflow:hidden;box-shadow:var(--shadow)}
+/* ⚠ flex:none, and it is not cosmetic. #leadscroll is a flex COLUMN, and a flex child shrinks by
+   default -- so the moment the activity feed made the record overflow, the browser squashed every
+   one of these cards to 2px and Josh got a row of empty strips three times in a row. Notes looked
+   fine only because it sits inside a flex:none wrapper. Measured: 2px before, 417px after. */
+.rcard{flex:none;background:#fff;border:1px solid var(--line);border-radius:14px;margin:12px 14px;overflow:hidden;box-shadow:var(--shadow)}
 .rcard-head{display:flex;align-items:center;gap:9px;padding:11px 14px;background:#f3f7ff;border-bottom:1px solid #e6eefb}
 .rcard-ico{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;background:#dbe7fb}
 .rcard-title{font-weight:800;font-size:14px;color:var(--brand)}
@@ -140,7 +144,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-27 11:37Z";
+const BUILD = "2026-08-27 11:47Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
