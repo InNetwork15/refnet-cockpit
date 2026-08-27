@@ -144,7 +144,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-27 11:52Z";
+const BUILD = "2026-08-27 12:00Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -1752,11 +1752,16 @@ function renderRecordHead(d) {
     </div>
     <div id="assignbox" style="display:none;margin-top:10px"></div>
     <div id="recruitbox" style="display:none;margin-top:10px"></div>
-  </div>
     <div id="sthist" style="display:none;margin-top:6px">
       ${(d.status_history || []).map(h => `<div class="meta">${h.from_status ? esc((STATUS[h.from_status] || [h.from_status])[0]) + " → " : ""}${esc((STATUS[h.to_status] || [h.to_status])[0])} · ${esc(h.changed_by || "the system")} · ${et(h.created_at)}</div>`).join("")}
     </div>
   </div>`;
+  // ⚠ ONE closing div, and #sthist belongs INSIDE the header. It briefly had two: the header closed
+  // early, the extra tag closed #leadscroll with it, and every card after the header was reparented
+  // out of the scroll container into #leaddetail — where the panel's overflow:hidden ate them. That
+  // is what "I have no way to assign a lead" and three screenshots of empty strips actually were.
+  // A stray tag does not throw, does not log, and looks perfect in any test that renders one
+  // function on its own. Assemble the whole record when checking layout, never a piece of it.
 }
 
 /* The first card is the one you came here to use. Call opens the dialler, Text drops you in their
