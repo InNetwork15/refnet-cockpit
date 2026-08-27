@@ -144,7 +144,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-27 11:47Z";
+const BUILD = "2026-08-27 11:52Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -1769,7 +1769,7 @@ function renderOutreach(d) {
       <a href="#/messages" onclick="jumpToThread('${esc(tel)}');return false"><span class="ic">💬</span>Text</a>
       <a href="${L.email ? "mailto:" + esc(L.email) : "#/email"}"><span class="ic">✉️</span>Email</a>
     </div>
-    ${d.last_touch ? `<div class="meta" style="margin-top:9px">Last touch: ${esc(d.last_touch.who || "somebody")} ${esc(d.last_touch.what)} · ${et(d.last_touch.at)}</div>` : `<div class="meta" style="margin-top:9px">Nobody has touched this yet</div>`}`;
+    ${d.last_touch ? `<div class="meta" style="margin-top:9px">Last touch: ${esc(d.last_touch.line || "")} · ${et(d.last_touch.at)}</div>` : `<div class="meta" style="margin-top:9px">Nobody has touched this yet</div>`}`;
   return card("📣", "Outreach", body, "#ffe6d6");
 }
 window.jumpToThread = (phone) => { location.hash = "#/messages"; setTimeout(() => { if (window.openThreadByPhone) window.openThreadByPhone(phone); }, 300); };
