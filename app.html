@@ -1726,6 +1726,17 @@ function renderRecordHead(d) {
       <span style="flex:1"></span>
       <span class="meta">${L.status_changed_at ? "moved " + et(L.status_changed_at) : ""}${(d.status_history || []).length > 1 ? ` · <a href="#" onclick="toggleStatusHistory();return false" style="color:var(--blue)">${d.status_history.length} moves</a>` : ""}</span>
     </div>
+    <!-- ⚠ THE PRIMARY ACTION LIVES AT THE TOP. Giving a lead an agent is the whole job of this
+         screen, and it spent a day buried in the third card down where Josh could not find it —
+         "I have no way to assign a lead to an agent anymore". A record's most important verb goes
+         next to who they are, not below three cards of context. -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:11px">
+      <button onclick="openAssignBox()" style="${d.coverage ? "" : "font-size:14px;padding:10px 18px"}">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>
+      ${d.nurture ? "" : `<button class="btn ghost" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}
+    </div>
+    <div id="assignbox" style="display:none;margin-top:10px"></div>
+    <div id="recruitbox" style="display:none;margin-top:10px"></div>
+  </div>
     <div id="sthist" style="display:none;margin-top:6px">
       ${(d.status_history || []).map(h => `<div class="meta">${h.from_status ? esc((STATUS[h.from_status] || [h.from_status])[0]) + " → " : ""}${esc((STATUS[h.to_status] || [h.to_status])[0])} · ${esc(h.changed_by || "the system")} · ${et(h.created_at)}</div>`).join("")}
     </div>
@@ -1770,11 +1781,7 @@ function renderStands(d) {
     <div class="meta">${esc(d.referred.by || "someone")} handed them over ${et(d.referred.at)}${d.referred.fee_pct != null ? ` · ${esc(d.referred.fee_pct)}% referral fee` : ` · <b>referral fee not set</b>`}</div>
     <div class="meta">They own the relationship now — no showing fee accrues here.</div></div>`);
   if ((d.commitments || []).length) bits.push(`<div class="meta" style="margin-top:8px"><b>Promises we made (${d.commitments.length})</b>${d.commitments.map(c => `<div>• ${esc(c.title)} — ${esc(c.owner_name || "unassigned")}</div>`).join("")}<a href="#/owed" style="color:var(--blue)">Open Owed to send them →</a></div>`);
-  bits.push(`<div style="margin-top:11px;display:flex;gap:8px;flex-wrap:wrap">
-    <button onclick="openAssignBox()">${d.coverage ? "👤 Reassign" : "👤 Assign an agent"}</button>
-    ${d.nurture ? "" : `<button class="btn ghost" onclick="nurtureLead('${L.id}')">🌱 Nurture</button>`}</div>
-    <div id="assignbox" style="display:none;margin-top:10px"></div>
-    <div id="recruitbox" style="display:none;margin-top:10px"></div>`);
+
   return card("🧭", "Where this stands", bits.join(""), "#dbe7fb");
 }
 
