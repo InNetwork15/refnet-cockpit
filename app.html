@@ -140,6 +140,8 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
+const BUILD = "2026-08-27 11:37Z";
+console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -227,10 +229,10 @@ function renderShell() {
     <button class="btn ghost" id="suggbtn" title="Suggest an improvement" style="padding:6px 11px;border-radius:999px;margin-right:8px;font-size:14px;line-height:1">💡</button>
     <div id="botpills" style="display:flex;align-items:center;margin-right:12px"></div>
     <div style="position:relative">
-      <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)}">${esc(initials)}</button>
+      <button class="ava" id="whoava" title="${esc(ME.email)} · ${esc(ME.role)} · build ${BUILD}">${esc(initials)}</button>
       <div class="whodd" id="whodd">
         <div style="font-size:12.5px;font-weight:700;color:var(--brand)">${esc(ME.full_name||ME.email)}</div>
-        <div class="meta" style="margin:2px 0 10px">${esc(ME.role)}</div>
+        <div class="meta" style="margin:2px 0 10px">${esc(ME.role)} · build ${BUILD}</div>
         <a href="#/profile" class="btn ghost" style="display:block;width:100%;text-align:center;box-sizing:border-box;margin-bottom:7px;text-decoration:none" onclick="document.getElementById('whodd').style.display='none'">My Profile</a>
         <button class="btn ghost" id="signout" style="width:100%">Sign out</button>
       </div>
@@ -1603,16 +1605,16 @@ async function loadLead(id) {
   // appeared twice, and the status showed as a chip AND a dropdown of the same word. Everything is
   // a card now, each fact lives in exactly one of them, and the actions sit with the thing they act on.
   el.innerHTML = `<div id="leadscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column">
-    ${renderRecordHead(d)}
-    ${renderOutreach(d)}
-    ${renderStands(d)}
-    ${renderSummary(d)}
-    ${renderContactCard(d)}
+    ${safeCard(renderRecordHead, "The header", d)}
+    ${safeCard(renderOutreach, "Outreach", d)}
+    ${safeCard(renderStands, "Where this stands", d)}
+    ${safeCard(renderSummary, "The short version", d)}
+    ${safeCard(renderContactCard, "Contact", d)}
     <div style="flex:none">
-      ${onClients() ? renderDetails(d) : ""}
-      ${renderNotes(d)}
-      ${onClients() ? renderTasks(d) : ""}
-      ${onClients() ? renderToured(d) : ""}
+      ${onClients() ? safeCard(renderDetails, "The file", d) : ""}
+      ${safeCard(renderNotes, "Notes", d)}
+      ${onClients() ? safeCard(renderTasks, "Follow-ups", d) : ""}
+      ${onClients() ? safeCard(renderToured, "Homes seen", d) : ""}
     </div>
     <div style="display:flex;gap:6px;padding:8px 14px;border-top:1px solid #eef0f4;position:sticky;top:0;background:#fff;z-index:2;flex:none">
       ${["activity", "conversation"].map(t => `<span onclick="setLeadTab('${t}')" style="cursor:pointer;font-size:12px;font-weight:700;padding:4px 12px;border-radius:999px;
@@ -1693,6 +1695,16 @@ const onClients = () => location.hash.startsWith("#/clients");
    cards — the things you can act on first, the facts under it.
    ⚠ The three "do not contact" toggles in the recruiting version are per channel. We have ONE flag,
    so there is ONE checkbox. Drawing three that all write the same field would look richer and lie. */
+/* A section that throws should NAME ITSELF rather than leaving a blank strip on the record. */
+function safeCard(fn, label, d) {
+  try { return fn(d) || ""; }
+  catch (e) {
+    console.error("card failed:", label, e);
+    return '<div class="rcard"><div class="rcard-body" style="color:var(--red);font-size:12.5px"><b>'
+      + label + '</b> could not be drawn \u2014 ' + esc(String(e && e.message || e))
+      + '. The rest of the record is fine.</div></div>';
+  }
+}
 const card = (ico, title, body, tint) => `<div class="rcard">
   <div class="rcard-head"><div class="rcard-ico" style="background:${tint || "#dbe7fb"}">${ico}</div>
     <div class="rcard-title">${title}</div></div>
