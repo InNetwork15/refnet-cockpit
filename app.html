@@ -50,6 +50,9 @@ input,textarea{font:inherit;border:1px solid var(--line);border-radius:10px;padd
 .lane-client{background:#e3ecfb;color:#1a56b0}.lane-agent{background:#e6f5ef;color:var(--green)}
 /* the nurture line's own colour, so a bot conversation is not mistaken for Tony typing */
 .lane-nurture{background:#f1e9fb;color:var(--purple)}
+/* the two showing agents' own lines — Brody 2026-08-28, Anthony the same day */
+.lane-brody{background:#fdf1dc;color:var(--amber)}
+.lane-anthony{background:#e2f5f3;color:#0a7f74}
 .ok{color:var(--green);font-weight:700}.bad{color:var(--red);font-weight:700}
 .empty{color:var(--muted);font-style:italic;padding:10px 0}
 table{width:100%;border-collapse:collapse}
@@ -133,6 +136,9 @@ th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;fo
    looks empty. */
 .zchips select{font-family:inherit}
 .zchips select option{background:#fff;color:#41506a;font-weight:600}
+/* same trick for the line picker in Messages: options inherit white-on-blue and Chrome draws the
+   open list on its own white panel, so without this the names render white on white */
+.mfilter select option{background:#fff;color:#52617a;font-weight:600}
 .ztiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
 .ztile{background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:12px 15px}
 .ztile span{display:block;font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:#8a93a3;font-weight:700}
@@ -152,7 +158,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-28 13:21Z";
+const BUILD = "2026-08-28 14:29Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -512,7 +518,7 @@ window.withdrawOffer = async (placementId) => {
 /* ---------- MESSAGES (INRE two-way SMS widget pattern) ---------- */
 let SELCONV = null, THREADSIG = "";
 async function viewMessages() {
-  V().innerHTML = `<h1>Messages <button class="btn ghost" style="float:right" onclick="newGroupText()">👥 New group text</button></h1><div class="sub">RingCentral — three lines: client (Tony 248-278-4307), recruiting (TJ 248-663-1043) and nurture (248-246-1781). AI drafts appear below the thread for one-tap send. Group threads show 👥 — everyone in them sees every message.</div>
+  V().innerHTML = `<h1>Messages <button class="btn ghost" style="float:right" onclick="newGroupText()">👥 New group text</button></h1><div class="sub">RingCentral — every line we own: client (Tony 248-278-4307), recruiting (TJ 248-663-1043), nurture (248-246-1781), Brody (248-731-9009) and Anthony (248-230-9069). AI drafts appear below the thread for one-tap send. Group threads show 👥 — everyone in them sees every message.</div>
     <div class="msgshell"><div class="convlist" id="convlist">Loading…</div>
     <div class="thread" id="thread"><div class="empty" style="padding:20px">Pick a conversation.</div></div></div>`;
   await refreshConvs();
@@ -552,6 +558,8 @@ const MLINE = {
   tony:    { chip: "📱 Tony",    badge: "client",     head: "client lane — Tony's line",         cls: "lane-client",  title: "Tony's client line — buyers" },
   tj:      { chip: "🤝 TJ",      badge: "recruiting", head: "recruiting lane — TJ's line",       cls: "lane-agent",   title: "TJ's recruiting line — showing agents" },
   nurture: { chip: "🌱 Nurture", badge: "nurture",    head: "nurture line — the check-back bot", cls: "lane-nurture", title: "The nurture line — clients the bot is checking back with" },
+  brody:   { chip: "👤 Brody",   badge: "Brody",      head: "Brody's own line",                  cls: "lane-brody",   title: "Brody Law's own line (248-731-9009)" },
+  anthony: { chip: "👤 Anthony", badge: "Anthony",    head: "Anthony's own line",                cls: "lane-anthony", title: "Anthony Wright's own line (248-230-9069)" },
 };
 const lineOf = (c) => (c && c.line && MLINE[c.line]) ? c.line : (c && c.lane === "agent" ? "tj" : "tony");
 window.mlineOf = lineOf;
@@ -567,10 +575,17 @@ async function refreshConvs(silent) {
   const need = onLane.filter(c => c.reply_state === "needs_reply").length;
   const rows = window.__convs.map((c, i) => ({ c, i }))
     .filter(x => (!lane || lineOf(x.c) === lane) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
+  /* ⚠ A CHIP PER LINE DID NOT SURVIVE THE FIFTH LINE (Josh 2026-08-28). Three lines fitted on one
+     row; five pushed the filter bar to THREE rows and 112px, eating 27% of a 420px conversation
+     list — measured, not guessed. The list is the screen; the filter is not. A picker holds any
+     number of lines in one row and is the same control Clients uses for agents, so the two screens
+     filter the same way. */
   el.innerHTML = `<div class="mfilter" style="flex-wrap:wrap">
-      <button class="${!lane?"on":""}" onclick="setMLane('')">All (${nAll})</button>
-      ${Object.entries(MLINE).map(([k, m]) =>
-        `<button class="${lane===k?"on":""}" onclick="setMLane('${k}')" title="${esc(m.title)}">${m.chip} (${nLine(k)})</button>`).join("")}
+      <select id="mline" onchange="setMLane(this.value)" title="Which of our lines carried it"
+        style="max-width:190px;padding:5px 10px;border-radius:20px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;
+        border:1px solid ${lane?"var(--blue)":"#dbe1ea"};background:${lane?"var(--blue)":"#fff"};color:${lane?"#fff":"#52617a"}"
+      ><option value=""${!lane?" selected":""}>All lines (${nAll})</option>${Object.entries(MLINE).map(([k, m]) =>
+        `<option value="${k}"${lane===k?" selected":""}>${esc(m.chip)} (${nLine(k)})</option>`).join("")}</select>
       <span style="flex:1"></span>
       <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(!window.__mNeedsOnly)">● Needs reply (${need})</button></div>`
     + (rows.map(({c, i}) => `<div class="convrow ${c.reply_state==="needs_reply"?"needs":""} ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
