@@ -48,6 +48,8 @@ input,textarea{font:inherit;border:1px solid var(--line);border-radius:10px;padd
 .kind{display:inline-block;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;background:#eef1f6;color:#52617a;margin-right:6px}
 .kind.hot{background:#fbe9e8;color:var(--red)}
 .lane-client{background:#e3ecfb;color:#1a56b0}.lane-agent{background:#e6f5ef;color:var(--green)}
+/* the nurture line's own colour, so a bot conversation is not mistaken for Tony typing */
+.lane-nurture{background:#f1e9fb;color:var(--purple)}
 .ok{color:var(--green);font-weight:700}.bad{color:var(--red);font-weight:700}
 .empty{color:var(--muted);font-style:italic;padding:10px 0}
 table{width:100%;border-collapse:collapse}
@@ -150,7 +152,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-27 12:20Z";
+const BUILD = "2026-08-28 13:10Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -510,7 +512,7 @@ window.withdrawOffer = async (placementId) => {
 /* ---------- MESSAGES (INRE two-way SMS widget pattern) ---------- */
 let SELCONV = null, THREADSIG = "";
 async function viewMessages() {
-  V().innerHTML = `<h1>Messages <button class="btn ghost" style="float:right" onclick="newGroupText()">👥 New group text</button></h1><div class="sub">RingCentral — client line (Tony 248-278-4307) + recruiting line (TJ 248-663-1043). AI drafts appear below the thread for one-tap send. Group threads show 👥 — everyone in them sees every message.</div>
+  V().innerHTML = `<h1>Messages <button class="btn ghost" style="float:right" onclick="newGroupText()">👥 New group text</button></h1><div class="sub">RingCentral — three lines: client (Tony 248-278-4307), recruiting (TJ 248-663-1043) and nurture (248-246-1781). AI drafts appear below the thread for one-tap send. Group threads show 👥 — everyone in them sees every message.</div>
     <div class="msgshell"><div class="convlist" id="convlist">Loading…</div>
     <div class="thread" id="thread"><div class="empty" style="padding:20px">Pick a conversation.</div></div></div>`;
   await refreshConvs();
@@ -537,30 +539,45 @@ window.setMFilter = (v) => { window.__mNeedsOnly = v; refreshConvs(true); };
    which is the only trustworthy source: Brandi is a partner agent but her thread ran on Tony's
    CLIENT line, and going by contact type would have filed her under TJ. */
 window.setMLane = (v) => { window.__mLane = v; refreshConvs(true); };
+/* THE THREE LINES (Josh 2026-08-28: "show me the nurture line too").
+   There are chips for two numbers here because for most of this build there were two. Nurture got
+   its own — 248-246-1781, carrier-registered 8/26 — and its conversations would otherwise sit
+   inside Tony's chip, because the sync deliberately stamps them lane='client' so that a buyer's
+   REPLY attaches to their lead. lane says who a thread belongs to; it never said which line.
+   The server now sends `line`, read off the number that actually carried the messages. The lane
+   fallback below is not decoration: a browser still holding an older copy of this page, or a
+   thread from before our_number was stamped, has to keep filing correctly rather than fall out of
+   every chip and read as a book that shrank overnight. */
+const MLINE = {
+  tony:    { chip: "📱 Tony",    badge: "client",     head: "client lane — Tony's line",         cls: "lane-client",  title: "Tony's client line — buyers" },
+  tj:      { chip: "🤝 TJ",      badge: "recruiting", head: "recruiting lane — TJ's line",       cls: "lane-agent",   title: "TJ's recruiting line — showing agents" },
+  nurture: { chip: "🌱 Nurture", badge: "nurture",    head: "nurture line — the check-back bot", cls: "lane-nurture", title: "The nurture line — clients the bot is checking back with" },
+};
+const lineOf = (c) => (c && c.line && MLINE[c.line]) ? c.line : (c && c.lane === "agent" ? "tj" : "tony");
+window.mlineOf = lineOf;
 async function refreshConvs(silent) {
   const d = await api("?section=conversations");
   const el = document.getElementById("convlist"); if (!el) return;
   window.__convs = d.conversations || [];
   const lane = window.__mLane || "";
-  const onLane = window.__convs.filter(c => !lane || c.lane === lane);
+  const onLane = window.__convs.filter(c => !lane || lineOf(c) === lane);
   // counts are per line, so "Needs reply" means "on the line you are looking at"
   const nAll = window.__convs.length;
-  const nTony = window.__convs.filter(c => c.lane === "client").length;
-  const nTJ = window.__convs.filter(c => c.lane === "agent").length;
+  const nLine = (k) => window.__convs.filter(c => lineOf(c) === k).length;
   const need = onLane.filter(c => c.reply_state === "needs_reply").length;
   const rows = window.__convs.map((c, i) => ({ c, i }))
-    .filter(x => (!lane || x.c.lane === lane) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
+    .filter(x => (!lane || lineOf(x.c) === lane) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
   el.innerHTML = `<div class="mfilter" style="flex-wrap:wrap">
       <button class="${!lane?"on":""}" onclick="setMLane('')">All (${nAll})</button>
-      <button class="${lane==="client"?"on":""}" onclick="setMLane('client')" title="Tony's client line — buyers">📱 Tony (${nTony})</button>
-      <button class="${lane==="agent"?"on":""}" onclick="setMLane('agent')" title="TJ's recruiting line — showing agents">🤝 TJ (${nTJ})</button>
+      ${Object.entries(MLINE).map(([k, m]) =>
+        `<button class="${lane===k?"on":""}" onclick="setMLane('${k}')" title="${esc(m.title)}">${m.chip} (${nLine(k)})</button>`).join("")}
       <span style="flex:1"></span>
       <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(!window.__mNeedsOnly)">● Needs reply (${need})</button></div>`
     + (rows.map(({c, i}) => `<div class="convrow ${c.reply_state==="needs_reply"?"needs":""} ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
-    <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting":"client"}</span>
+    <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind ${MLINE[lineOf(c)].cls}">${MLINE[lineOf(c)].badge}</span>
     <div style="margin:3px 0 1px">${stateChip(c)}</div>
     <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("")
-    || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply here — all caught up. 🎉":(lane?"No conversations on this line yet.":"No conversations yet.")}</div>`);
+    || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply here — all caught up. 🎉":(lane==="nurture"?"Nothing on the nurture line yet — it has its own number and is wired up, but the nurture bot is switched off, so it has never sent or answered anything. The switch is on <a href=\"#/nurture\" style=\"color:var(--blue)\">Nurture</a>.":lane?"No conversations on this line yet.":"No conversations yet.")}</div>`);
 }
 window.openConvIdx = (i) => { const c = (window.__convs||[])[i]; if (!c) return; SELCONV = c; THREADSIG = ""; refreshConvs(true); loadThread(c); };
 async function loadThread(c, silent) {
@@ -570,7 +587,7 @@ async function loadThread(c, silent) {
   THREADSIG = sig;
   const th = document.getElementById("thread"); if (!th) return;
   th.innerHTML = `<div class="thhead"><span class="whoName">${c.is_group?"👥 ":""}${esc(c.name || fmtPh(c.key))}</span>
-      <span class="kind lane-${c.lane}">${c.lane==="agent"?"recruiting lane — TJ's line":"client lane — Tony's line"}</span>
+      <span class="kind ${MLINE[mlineOf(c)].cls}">${MLINE[mlineOf(c)].head}</span>
       <span class="meta">${c.is_group?"group text — everyone sees every message · "+(c.members||c.key.split(",")).map(fmtPh).join(" · "):fmtPh(c.key)}</span></div>
     ${d.reply_state==="needs_reply"
       ? `<div class="statebar needs">● Not responded to yet — they've been waiting ${waitFor(d.wait_min)}.</div>`
