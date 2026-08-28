@@ -152,7 +152,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-28 13:10Z";
+const BUILD = "2026-08-28 13:21Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -1525,7 +1525,12 @@ function drawClients() {
   const grp = CGROUP.find(g => g[0] === CSTAGEF);
   const keys = grp ? grp[2] : (CSTAGEF ? [CSTAGEF] : null);
   let rows = keys ? inAgent.filter(r => keys.includes(r.stage)) : inAgent;
-  if (q) rows = rows.filter(r => [r.client, r.city, r.address, r.zip, r.agent, r.phone, r.email]
+  /* ⚠ THE SEARCH LOOKS FOR A CLIENT, NOT AN AGENT (Josh 2026-08-28: "i was searching butch adkins
+     and this client is showing up"). It used to match r.agent too, which made sense when the only
+     way to ask "whose is this" was to type it. Now there is a picker for that, and matching the
+     agent's name here does the opposite of what somebody typing a name expects: it hands back a
+     stranger — a client who happens to have been referred to Butch — as if that were Butch. */
+  if (q) rows = rows.filter(r => [r.client, r.city, r.address, r.zip, r.phone, r.email]
     .some(v => String(v ?? "").toLowerCase().includes(q)));
   window.__clients = rows;
   const n = (ks) => ks.reduce((a, k) => a + (c[k] || 0), 0);
@@ -1540,7 +1545,7 @@ function drawClients() {
         style="max-width:230px;padding:7px 12px;border-radius:999px;font-weight:600;font-size:13px;cursor:pointer;
         border:1px solid ${CAGENT ? "var(--blue)" : "#dbe1ea"};background:${CAGENT ? "var(--blue)" : "#fff"};color:${CAGENT ? "#fff" : "#41506a"}"
       >${opt("", "Any agent", all.length, !CAGENT)}${agents.map(([name, cnt]) => opt(name, name, cnt, CAGENT === name)).join("")}${unowned ? opt(CNOAGENT, "Nobody yet", unowned, CAGENT === CNOAGENT) : ""}</select>`
-    + `<input id="cq" placeholder="Search name, city, address, agent, phone…" style="width:270px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
+    + `<input id="cq" placeholder="Search a client — name, city, address, phone…" style="width:270px;padding:7px 12px;border-radius:999px;border:1px solid #dbe1ea"
         value="${esc(CQ)}" oninput="CQ=this.value" onkeydown="if(event.key==='Enter')drawClients()">`;
 
   document.getElementById("csub").innerHTML =
@@ -1559,13 +1564,20 @@ function drawClients() {
       ${r.lane === "vl" ? `<span class="kind" style="background:#efe7d9;color:#7a5a12">VL</span>` : ""}
       ${r.do_not_contact ? `<span class="kind hot">opted out</span>` : ""}
       <div style="margin:3px 0 1px">${r.status ? `<span class="st" style="border-color:${(STATUS[r.status]||[])[1]||colour};font-weight:700">${(STATUS[r.status]||[r.status])[0]}</span>` : `<span class="st" style="border-color:${colour}">${label}</span>`}
-        ${r.agent ? `<span class="kind lane-agent">${esc(r.agent)}</span>` : ""}
+        ${r.agent ? (r.stage === "referred"
+            ? `<span class="kind" style="background:#eef1f6;color:#52617a">🤝 referred to ${esc(r.agent)}</span>`
+            : `<span class="kind lane-agent">👤 ${esc(r.agent)}</span>`) : ""}
         ${r.seen ? `<span class="kind">${r.seen} seen</span>` : ""}
         ${r.notes ? `<span class="kind" title="somebody has written on this record">${r.has_pinned_note ? "📌" : "📝"} ${r.notes}</span>` : ""}</div>
       <div class="meta">${esc(r.address || "—")}${r.city ? ", " + esc(r.city) : ""}${r.zip ? " · " + esc(r.zip) : ""}</div>
       <div class="meta">${r.price ? "$" + Number(r.price).toLocaleString() : "no price"} · ${r.last_activity ? et(r.last_activity) : "no activity"}</div>
     </div>`;
-  }).join("") || `<div class="empty" style="padding:14px">Nobody matches.${CAGENT ? ` <a onclick="setCAgent('')" style="color:var(--blue);cursor:pointer;text-decoration:underline">Show every agent</a>` : ""}</div>`;
+  }).join("") || `<div class="empty" style="padding:14px">No client matches “${esc(CQ.trim())}”.${
+      // If what they typed is an AGENT's name, that is almost certainly who they were after --
+      // so offer the thing the search can no longer do, rather than leaving a dead end.
+      (() => { const hit = q ? agents.find(([n]) => n.toLowerCase().includes(q)) : null;
+        return hit ? ` <b>${esc(hit[0])}</b> is an agent — <a onclick="CQ='';setCAgent('${esc(hit[0])}')" style="color:var(--blue);cursor:pointer;text-decoration:underline">show their ${hit[1]} client${hit[1]===1?"":"s"}</a>.` : ""; })()
+    }${CAGENT ? ` <a onclick="setCAgent('')" style="color:var(--blue);cursor:pointer;text-decoration:underline">Show every agent</a>` : ""}</div>`;
 }
 window.drawClients = drawClients;
 async function refreshClients() { await loadClients(); }
@@ -1784,7 +1796,17 @@ function renderRecordHead(d) {
         <div class="rname">${esc(name)}</div>
         <div class="rsub">${esc([L.first_inquiry_city, L.zip].filter(Boolean).join(" · ")) || "—"}${L.lane === "vl" ? ' · <b style="color:#7a5a12">vacant land</b>' : ""}</div>
         <div class="rsub">${esc(L.first_inquiry_address || "")}</div>
-        ${d.coverage ? `<div class="rsub">🤝 <b style="color:var(--green)">${esc(d.coverage.agent)}</b> is covering this${d.coverage.is_team ? " (in-house)" : ""}</div>` : `<div class="rsub">Nobody is covering this yet</div>`}
+        ${/* ⚠ A CLIENT WHO HAS BEEN REFERRED OUT IS NOT BEING "COVERED" (Josh 2026-08-28).
+              Trenton Blanzy read "🤝 Anthony Wright is covering this (in-house)" at the top while
+              the card below said he had been handed to Butch Adkins that morning and that we no
+              longer earn on him. Both facts were true — Anthony did show him the house — but the
+              header stated the stale one as the present tense. Who owns them now comes first; who
+              showed them a house is history, and reads as history. */
+          d.referred
+          ? `<div class="rsub">🤝 <b style="color:var(--blue)">${esc(d.referred.agent)}</b> owns this now — referred out${d.referred.at ? " " + et(d.referred.at) : ""}${d.coverage ? `<span class="meta"> · ${esc(d.coverage.agent)} showed them a house before that</span>` : ""}</div>`
+          : d.coverage
+          ? `<div class="rsub">🤝 <b style="color:var(--green)">${esc(d.coverage.agent)}</b> is covering this${d.coverage.is_team ? " (in-house)" : ""}</div>`
+          : `<div class="rsub">Nobody is covering this yet</div>`}
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px">
