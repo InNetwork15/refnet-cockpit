@@ -158,7 +158,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-28 14:29Z";
+const BUILD = "2026-08-30 15:17Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -562,19 +562,25 @@ const MLINE = {
   anthony: { chip: "👤 Anthony", badge: "Anthony",    head: "Anthony's own line",                cls: "lane-anthony", title: "Anthony Wright's own line (248-230-9069)" },
 };
 const lineOf = (c) => (c && c.line && MLINE[c.line]) ? c.line : (c && c.lane === "agent" ? "tj" : "tony");
+/* A thread can sit on SEVERAL of our lines (Josh 2026-08-30: "this is only showing in tonys line
+   and i like it better showing in all lines"). The internal group ran across Tony, TJ, Brody and
+   Anthony, and filing it under whichever spoke last meant picking "Brody" hid a conversation Brody
+   is in. Membership, not last-speaker: a thread shows under EVERY line that carried it. */
+const onLineOf = (c, k) => Array.isArray(c && c.lines) && c.lines.length
+  ? c.lines.includes(k) : lineOf(c) === k;
 window.mlineOf = lineOf;
 async function refreshConvs(silent) {
   const d = await api("?section=conversations");
   const el = document.getElementById("convlist"); if (!el) return;
   window.__convs = d.conversations || [];
   const lane = window.__mLane || "";
-  const onLane = window.__convs.filter(c => !lane || lineOf(c) === lane);
+  const onLane = window.__convs.filter(c => !lane || onLineOf(c, lane));
   // counts are per line, so "Needs reply" means "on the line you are looking at"
   const nAll = window.__convs.length;
-  const nLine = (k) => window.__convs.filter(c => lineOf(c) === k).length;
+  const nLine = (k) => window.__convs.filter(c => onLineOf(c, k)).length;
   const need = onLane.filter(c => c.reply_state === "needs_reply").length;
   const rows = window.__convs.map((c, i) => ({ c, i }))
-    .filter(x => (!lane || lineOf(x.c) === lane) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
+    .filter(x => (!lane || onLineOf(x.c, lane)) && (!window.__mNeedsOnly || x.c.reply_state === "needs_reply"));
   /* ⚠ A CHIP PER LINE DID NOT SURVIVE THE FIFTH LINE (Josh 2026-08-28). Three lines fitted on one
      row; five pushed the filter bar to THREE rows and 112px, eating 27% of a 420px conversation
      list — measured, not guessed. The list is the screen; the filter is not. A picker holds any
@@ -589,7 +595,7 @@ async function refreshConvs(silent) {
       <span style="flex:1"></span>
       <button class="${window.__mNeedsOnly?"on":""}" onclick="setMFilter(!window.__mNeedsOnly)">● Needs reply (${need})</button></div>`
     + (rows.map(({c, i}) => `<div class="convrow ${c.reply_state==="needs_reply"?"needs":""} ${SELCONV&&SELCONV.key===c.key?"sel":""}" onclick="openConvIdx(${i})">
-    <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind ${MLINE[lineOf(c)].cls}">${MLINE[lineOf(c)].badge}</span>
+    <span class="whoName">${esc(c.name || fmtPh(c.key))}</span> ${c.is_group?`<span class="kind">👥 group</span>`:""}<span class="kind ${MLINE[lineOf(c)].cls}">${(c.lines && c.lines.length > 1) ? c.lines.length + " of our lines" : MLINE[lineOf(c)].badge}</span>
     <div style="margin:3px 0 1px">${stateChip(c)}</div>
     <div class="meta">${c.last_dir==="out"?"➡ ":"⬅ "}${esc(c.last_body)}</div><div class="meta">${et(c.last_at)}</div></div>`).join("")
     || `<div class="empty" style="padding:14px">${window.__mNeedsOnly?"Nothing waiting on a reply here — all caught up. 🎉":(lane==="nurture"?"Nothing on the nurture line yet — it has its own number and is wired up, but the nurture bot is switched off, so it has never sent or answered anything. The switch is on <a href=\"#/nurture\" style=\"color:var(--blue)\">Nurture</a>.":lane?"No conversations on this line yet.":"No conversations yet.")}</div>`);
