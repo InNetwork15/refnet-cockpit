@@ -158,7 +158,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-30 15:17Z";
+const BUILD = "2026-08-31 11:10Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -970,6 +970,19 @@ async function viewAgents() {
   // Earned a place: they showed a house, or they signed terms with us.
   const showing = all.filter(p => !p.is_team && (p.showings_total > 0 || p.terms_agreed_at));
   const referral = all.filter(p => p.is_referral_partner);
+  /* ⚠⚠ NOTHING WE ADD IS ALLOWED TO VANISH (Josh 2026-08-31: "TJ said he added an agent and its
+     not showing up in refnet" — Drew Dutcher, added 8/27).
+     Every drawer above requires the agent to have EARNED a place: in-house, or shown a house, or
+     signed terms, or been ticked as a referral partner. TJ added Drew and ticked none of those —
+     why would he, the tick is a deal we have not done yet — so the record saved fine and then
+     appeared nowhere. **The "＋ Add agent" button was creating people the page then refused to
+     show**, and it was not one person: 58 of 69 agents fitted no drawer, and the page was
+     displaying 7 of them.
+     This drawer is the "everyone else" that a filtered page always needs. It is defined as
+     whoever the other three did not claim — not by its own rule — so it cannot drift out of sync
+     with them and open a second hole. */
+  const filed = new Set([...team, ...showing, ...referral].map(p => p.id));
+  const unfiled = all.filter(p => !filed.has(p.id));
 
   // ---- the bench, grouped BY TOWN, not by job ----
   // A town can carry a standing bench AND jobs opened for individual leads, holding overlapping
@@ -1070,6 +1083,19 @@ async function viewAgents() {
         </div>`).join("") || '<div class="meta" style="padding-left:12px">Nobody found yet — the recruiter checks this town every 15 minutes.</div>'}</div>
     </details>`).join("") : `<div class="empty">No recruiting under way.</div>`}`;
 
+  const unfiledBody = unfiled.length
+    ? `<div class="meta" style="margin-bottom:8px">Added to the book, but nobody has said what they are yet — so they are not offered when a client needs an agent. Open one and tick <b>in-house</b>, <b>referral partner</b>, or agree showing terms, and they move up into the right drawer.</div>
+      <div style="overflow-x:auto"><table><tr><th>Agent</th><th>Brokerage</th><th>Contact</th><th>Status</th><th>Added</th><th></th></tr>`
+      + unfiled.map(p => `<tr>
+        <td><a href="#/agent/${p.id}" class="whoName" style="color:var(--blue);text-decoration:none">${esc(p.full_name)}</a>${p.do_not_contact?' <span class="kind hot">OPTED OUT</span>':''}</td>
+        <td class="meta">${esc(p.brokerage_name||"—")}</td>
+        <td class="meta">${p.cell_phone?esc(fmtPh(p.cell_phone)):""}${p.email?(p.cell_phone?" · ":"")+esc(p.email):""}${(!p.cell_phone&&!p.email)?'<span class="kind hot">no contact details</span>':""}</td>
+        <td class="meta">${esc(p.status||"—")}</td>
+        <td class="meta">${p.created_at?et(p.created_at):"—"}</td>
+        <td><a class="btn ghost" style="padding:4px 10px;font-size:11.5px;text-decoration:none" href="#/agent/${p.id}">Set their role</a></td></tr>`).join("")
+      + `</table></div>`
+    : `<div class="empty">Everybody in the book has a role.</div>`;
+
   const miss = (n, why) => n ? `<span class="st st-needs">${n} ${why}</span>` : "";
   document.getElementById("agentacc").innerHTML =
       acc("team", "👥", "Our team", `<span class="kind">${team.length}</span>`
@@ -1079,6 +1105,8 @@ async function viewAgents() {
         + miss(showing.filter(p => !p.payout_method).length, "no payout method"), showBody, false)
     + acc("referrals", "🤝", "Referral partners", `<span class="kind">${referral.length}</span>`
         + miss(referral.filter(p => p.referral_fee_pct == null).length, "no fee set"), refBody, false)
+    + acc("unfiled", "📇", "In the book, no role set", `<span class="kind">${unfiled.length}</span>`
+        + (unfiled.length ? `<span class="st st-needs">cannot be handed a client yet</span>` : ""), unfiledBody, false)
     + acc("bench", "🎯", "Recruiting bench",
         `<span class="kind">${bt.agents} across ${bt.cities} towns</span>`
         + (bt.left ? `<span class="st st-needs">${bt.left} never texted</span>` : ""), benchBody, false);
