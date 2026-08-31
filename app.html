@@ -158,7 +158,7 @@ th.zactive{color:var(--brand)}
 <script>
 const SUPABASE_URL = "https://bvatwpiygebcgdctgltv.supabase.co";
 const SUPABASE_KEY = "sb_publishable_YBvv1c9_bpVPlH6g-Z1Xmg_-U8ir3fx";
-const BUILD = "2026-08-31 11:10Z";
+const BUILD = "2026-08-31 11:19Z";
 console.log("%cRefNet build " + BUILD, "color:#2f6fed;font-weight:700");
 const API = SUPABASE_URL + "/functions/v1/refnet-app";
 const MAP_VIEW_TOKEN = "3b76533328a8c32f62ca74f7ec8e0075836bf538922039a0"; // view-only map key
@@ -1531,7 +1531,7 @@ let CSTAGEF = "", CSEL = null, CQ = "", CAGENT = "";
 // an empty picker keeps meaning ANY agent, which is the resting state the page opens in.
 const CNOAGENT = "__none__";
 async function viewClients() {
-  V().innerHTML = `<h1>Clients</h1>
+  V().innerHTML = `<h1>Clients <button class="btn" style="float:right" onclick="openAddClient()">＋ Add client</button></h1>
     <div class="sub">Everybody, whatever stage they are at. Leads that still need an agent are also on <a href="#/leads" style="color:var(--blue)">Leads</a>, which is the inbox — this is the book.</div>
     <div class="zchips" id="cchips"></div>
     <div class="zchips" id="csub" style="margin-top:-4px"></div>
@@ -3849,6 +3849,67 @@ window.toggleAgRole = function (key) {
   if (sw) sw.style.display = R.has("showing") ? "block" : "none";
   const rf = document.getElementById("ag-reffees");
   if (rf) rf.style.display = R.has("referral") ? "flex" : "none";
+};
+/* ADD A CLIENT BY HAND (Josh 2026-08-31: "I need a button on the Clients page to Add a client").
+   Everyone in the book arrived from Zillow through FUB until now. Deliberately the same shape as
+   Add agent — same overlay, same required-field behaviour, same duplicate refusal — because two
+   dialogs that do the same job in two different ways teach one person two habits.
+   ⚠ The mobile is not a nice-to-have: every inbound text and call finds its person by those ten
+   digits, so the form says why, and the server refuses a number already on file rather than
+   quietly creating a second person who will start receiving somebody else's replies. */
+window.openAddClient = function () {
+  const old = document.getElementById("addclient"); if (old) { old.remove(); return; }
+  const ov = document.createElement("div"); ov.id = "addclient";
+  ov.style.cssText = "position:fixed;inset:0;background:rgba(21,41,74,.45);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px";
+  const fld = (id, label, ph, type) => '<label style="display:block;margin-bottom:9px">'
+    + '<span style="display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:3px">' + label + '</span>'
+    + '<input id="cl-' + id + '" type="' + (type || "text") + '" placeholder="' + (ph || "") + '" style="width:100%;margin:0"></label>';
+  ov.innerHTML = '<div style="background:#fff;border-radius:14px;max-width:520px;width:100%;box-shadow:0 18px 60px rgba(0,0,0,.3);padding:20px 22px;max-height:88vh;overflow-y:auto">'
+    + '<div style="font-weight:700;font-size:15px;margin-bottom:3px">Add a client</div>'
+    + '<div class="sub" style="font-size:12px;margin-bottom:12px">For somebody who did not come in through Zillow. They land on <b>Leads</b> as a new lead until an agent is given to them.</div>'
+    + '<div style="display:flex;gap:10px"><div style="flex:1">' + fld("first_name", "First name *", "Greg") + '</div>'
+    + '<div style="flex:1">' + fld("last_name", "Last name", "Adamczyk") + '</div></div>'
+    + fld("phone", "Mobile *", "(989) 555-0123", "tel")
+    + '<div class="meta" style="margin:-4px 0 9px;font-size:11.5px">Every reply, text and call is matched to a person by this number, so it has to be right and it has to be theirs.</div>'
+    + fld("email", "Email", "greg@example.com", "email")
+    + fld("address", "Property they asked about", "3943 N Skookum Rd")
+    + '<div style="display:flex;gap:10px"><div style="flex:2">' + fld("city", "City", "Luther") + '</div>'
+    + '<div style="flex:1">' + fld("zip", "ZIP", "49656") + '</div></div>'
+    + fld("est_purchase_price", "Price they are looking at", "185000")
+    + '<label style="display:flex;align-items:flex-start;gap:8px;font-size:12.5px;line-height:1.45;cursor:pointer;background:#fdf7ea;border:1px solid #f0dfae;border-radius:9px;padding:9px 11px;margin-bottom:10px">'
+    + '<input type="checkbox" id="cl-vl" style="width:auto;margin-top:2px;flex:none">'
+    + '<span style="flex:1;min-width:0">This is <b>vacant land</b>. Land is TJ\'s lane and is never asked about homes — it follows the land ladder instead.</span></label>'
+    + '<div id="cl-msg" class="meta" style="min-height:16px;margin-bottom:8px"></div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="btn ghost" id="cl-cancel">Cancel</button><button class="btn" id="cl-save">Add client</button></div></div>';
+  document.body.appendChild(ov);
+  ov.onclick = (e) => { if (e.target === ov && !(ov.querySelector("#cl-first_name") || {}).value) ov.remove(); };
+  ov.querySelector("#cl-cancel").onclick = () => ov.remove();
+  ov.querySelector("#cl-first_name").focus();
+
+  ov.querySelector("#cl-save").onclick = async function () {
+    const val = (k) => ((ov.querySelector("#cl-" + k) || {}).value || "").trim();
+    const msg = ov.querySelector("#cl-msg");
+    if (!val("first_name") && !val("last_name")) { msg.textContent = "Give them a name."; return; }
+    if (!val("phone")) { msg.textContent = "A mobile number is required — it is how their replies find them."; return; }
+    this.disabled = true; this.textContent = "Adding…"; msg.textContent = "";
+    const r = await api("", { method: "POST", body: JSON.stringify({
+      action: "create_client",
+      first_name: val("first_name"), last_name: val("last_name"), phone: val("phone"),
+      email: val("email"), address: val("address"), city: val("city"), zip: val("zip"),
+      est_purchase_price: val("est_purchase_price"),
+      lane: (ov.querySelector("#cl-vl") || {}).checked ? "vl" : "client",
+    }) });
+    if (r.error) {
+      // a duplicate is not a dead end -- offer the person who already holds that number
+      msg.innerHTML = esc(r.error) + (r.existing_id
+        ? ` <a style="color:var(--blue);cursor:pointer;text-decoration:underline" onclick="document.getElementById('addclient').remove();jumpToLead('${r.existing_id}')">Open them</a>` : "");
+      this.disabled = false; this.textContent = "Add client"; return;
+    }
+    ov.remove();
+    toast((r.name || "Client") + " added ✓");
+    jumpToLead(r.id);   // straight into the new record, where an agent can be assigned
+  };
 };
 window.openAddAgent = function () {
   window.__agRoles = new Set();
